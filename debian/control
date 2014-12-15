@@ -1,0 +1,11 @@
+Source: xmlfs
+Section: non-free:net
+Priority: optional
+Maintainer: Amok Berserker <amok@codestation.org>
+Standards-Version: 3.1.1
+
+Package: xmlfs
+Architecture: i386
+Depends: ${shlibs:Depends}
+Description: xmlfs - absolutelly nesslesscary tool.
+ xmlfs - does very much of very many different usefull things ... really.
