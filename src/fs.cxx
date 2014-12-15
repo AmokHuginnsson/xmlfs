@@ -244,14 +244,7 @@ public:
 			}
 			ok = true;
 		} while ( false );
-		int ret( 0 );
-		if ( ! ok ) {
-			errno = EACCES;
-			ret = -1;
-		} else {
-			errno = 0;
-		}
-		return ( ret );
+		return ( ok ? 0 : EACCES );
 		M_EPILOG
 	}
 	int getxattr( char const* path_, HString const& name_, char* buffer_, size_t size_ ) {
@@ -300,12 +293,10 @@ public:
 			if ( ret <= static_cast<int>( size_ ) ) {
 				::memcpy( buffer_, n.get_value().c_str(), ret );
 			} else if ( static_cast<int>( size_ ) > 0 ) {
-				ret = -1;
-				errno = ERANGE;
+				ret = ERANGE;
 			}
 		} else {
-			ret = -1;
-			errno = ENODATA;
+			ret = ENODATA;
 		}
 		return ( ret );
 		M_EPILOG
@@ -344,8 +335,7 @@ public:
 				}
 				errno = 0;
 			} else if ( size_ > 0 ) {
-				errno = ERANGE;
-				ret = -1;
+				ret = ERANGE;
 			}
 		} else {
 			errno = 0;
@@ -493,8 +483,7 @@ int getattr( char const* path_, struct stat* stat_ ) {
 	try {
 		_fs_->getattr( path_, stat_ );
 	} catch ( HException const& e ) {
-		ret = -1;
-		HScopedValueReplacement<int> saveErrno( errno, 0 );
+		ret = errno;
 		log( LOG_TYPE::ERROR ) << e.what() << ", " << errno << endl;
 	}
 	return ( ret );
@@ -604,8 +593,7 @@ int getxattr( char const* path_, char const* name_, char* buffer_, size_t size_ 
 	try {
 		ret = _fs_->getxattr( path_, name_, buffer_, size_ );
 	} catch ( HException const& e ) {
-		ret = -1;
-		HScopedValueReplacement<int> saveErrno( errno, 0 );
+		ret = errno;
 		log( LOG_TYPE::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
@@ -619,8 +607,7 @@ int listxattr( char const* path_, char* buffer_, size_t size_ ) {
 	try {
 		ret = _fs_->listxattr( path_, buffer_, size_ );
 	} catch ( HException const& e ) {
-		ret = -1;
-		HScopedValueReplacement<int> saveErrno( errno, 0 );
+		ret = errno;
 		log( LOG_TYPE::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
@@ -639,8 +626,7 @@ int opendir( char const* path_, struct fuse_file_info* info_ ) {
 	try {
 		info_->fh = _fs_->opendir( path_ );
 	} catch ( HException const& e ) {
-		ret = -1;
-		HScopedValueReplacement<int> saveErrno( errno, 0 );
+		ret = errno;
 		log( LOG_TYPE::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
@@ -655,8 +641,7 @@ int readdir( char const*, void* buffer_, fuse_fill_dir_t filler_,
 	try {
 		_fs_->readdir( buffer_, filler_, offset_, info_ );
 	} catch ( HException const& e ) {
-		ret = -1;
-		HScopedValueReplacement<int> saveErrno( errno, 0 );
+		ret = errno;
 		log( LOG_TYPE::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
@@ -670,8 +655,7 @@ int releasedir( char const* path_, struct fuse_file_info* info_ ) {
 	try {
 		_fs_->releasedir( info_->fh );
 	} catch ( HException const& e ) {
-		ret = -1;
-		HScopedValueReplacement<int> saveErrno( errno, 0 );
+		ret = errno;
 		log( LOG_TYPE::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
@@ -720,8 +704,7 @@ int access( char const* path_, int mode_ ) {
 	try {
 		ret = _fs_->access( path_, mode_ );
 	} catch ( HException const& e ) {
-		ret = -1;
-		HScopedValueReplacement<int> saveErrno( errno, 0 );
+		ret = errno;
 		log( LOG_TYPE::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
