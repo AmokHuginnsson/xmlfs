@@ -199,8 +199,8 @@ public:
 		HXml::HConstNodeProxy const& n( _directoryScans.at( info_->fh ) );
 		struct stat s;
 		get_stat( n, &s );
-		filler_( buf_, ".", NULL, 0 );
-		filler_( buf_, "..", &s, 0 );
+		filler_( buf_, ".", &s, 0 );
+		filler_( buf_, "..", NULL, 0 );
 		for ( HXml::HConstNodeProxy const& c : n ) {
 			get_stat( c, &s );
 			filler_( buf_, c.properties().at( FILE::PROPERTY::NAME ).c_str(), &s, 0 );
@@ -368,7 +368,8 @@ private:
 			}
 			bool found( false );
 			for ( HXml::HNodeProxy c : n ) {
-				if ( c.properties().at( FILE::PROPERTY::NAME ) == name ) {
+				HXml::HNode::properties_t::const_iterator it( c.properties().find( FILE::PROPERTY::NAME ) );
+				if ( ( it != c.properties().end() ) && ( it->second == name ) ) {
 					n = c;
 					found = true;
 					break;
@@ -381,6 +382,15 @@ private:
 		}
 		return ( n );
 		M_EPILOG
+	}
+	int get_hard_link_count( HXml::HConstNodeProxy const& n_ ) {
+		int hlc( 2 );
+		for ( HXml::HConstNodeProxy const& c : n_ ) {
+			if ( c.get_name() == FILE::TYPE::DIRECTORY ) {
+				++ hlc;
+			}
+		}
+		return ( hlc );
 	}
 	uid_t get_user( HXml::HConstNodeProxy const& n_ ) const {
 		M_PROLOG
@@ -408,7 +418,7 @@ private:
 			stat_->st_nlink = 1;
 		} else if ( type == FILE::TYPE::DIRECTORY ) {
 			stat_->st_mode = S_IFDIR;
-			stat_->st_nlink = n_.child_count() + 2;
+			stat_->st_nlink = get_hard_link_count( n_ );
 			stat_->st_size = ( stat_->st_nlink ) * 160;
 		} else if ( type == FILE::TYPE::SYMLINK ) {
 			stat_->st_mode = S_IFLNK;
