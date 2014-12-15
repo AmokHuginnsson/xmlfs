@@ -160,12 +160,10 @@ public:
 	handle_t opendir( tools::filesystem::path_t const& path_ ) {
 		M_PROLOG
 		HLock l( _mutex );
-		errno = 0;
 		handle_t h( _operationIdGenerator ++ );
 		HXml::HConstNodeProxy n( get_node_by_path( path_ ) );
 		if ( n.get_name() != FILE::TYPE::DIRECTORY ) {
-			errno = ENOTDIR;
-			throw HFileSystemException( "Path does not point to a directory: "_ys.append( path_ ) );
+			throw HFileSystemException( "Path does not point to a directory: "_ys.append( path_ ), -ENOTDIR );
 		}
 		_directoryScans.insert( make_pair( h, n ) );
 		return ( h );
@@ -174,11 +172,9 @@ public:
 	void releasedir( handle_t handle_ ) {
 		M_PROLOG
 		HLock l( _mutex );
-		errno = 0;
 		directory_scans_t::iterator it( _directoryScans.find( handle_ ) );
 		if ( ! ( it != _directoryScans.end() ) ) {
-			errno = EINVAL;
-			throw HFileSystemException( "Invalid handle: "_ys.append( handle_ ) );
+			throw HFileSystemException( "Invalid handle: "_ys.append( handle_ ), -EINVAL );
 		}
 		_directoryScans.erase( it );
 		return;
@@ -188,7 +184,6 @@ public:
 		M_PROLOG
 		HLock l( _mutex );
 		get_stat( get_node_by_path( path_ ), stat_ );
-		errno = 0;
 		return;
 		M_EPILOG
 	}
@@ -205,7 +200,6 @@ public:
 			get_stat( c, &s );
 			filler_( buf_, c.properties().at( FILE::PROPERTY::NAME ).c_str(), &s, 0 );
 		}
-		errno = 0;
 		return;
 		M_EPILOG
 	}
@@ -244,7 +238,7 @@ public:
 			}
 			ok = true;
 		} while ( false );
-		return ( ok ? 0 : EACCES );
+		return ( ok ? 0 : -EACCES );
 		M_EPILOG
 	}
 	int getxattr( char const* path_, HString const& name_, char* buffer_, size_t size_ ) {
@@ -253,8 +247,7 @@ public:
 		HXml::HConstNodeProxy n( get_node_by_path( path_ ) );
 		int pos( static_cast<int>( name_.find( '.' ) ) );
 		if ( pos == HString::npos ) {
-			errno = EINVAL;
-			throw HFileSystemException( "Invalid attribute name: "_ys.append( name_ ) );
+			throw HFileSystemException( "Invalid attribute name: "_ys.append( name_ ), -EINVAL );
 		}
 		bool ok( false );
 		for ( HXml::HConstNodeProxy c : n ) {
@@ -288,15 +281,14 @@ public:
 		}
 		int ret( 0 );
 		if ( ok ) {
-			errno = 0;
 			ret = static_cast<int>( n.get_value().get_size() );
 			if ( ret <= static_cast<int>( size_ ) ) {
 				::memcpy( buffer_, n.get_value().c_str(), ret );
 			} else if ( static_cast<int>( size_ ) > 0 ) {
-				ret = ERANGE;
+				ret = -ERANGE;
 			}
 		} else {
-			ret = ENODATA;
+			ret = -ENODATA;
 		}
 		return ( ret );
 		M_EPILOG
@@ -333,12 +325,9 @@ public:
 					offset += static_cast<int>( s->get_size() );
 					++ offset;
 				}
-				errno = 0;
 			} else if ( size_ > 0 ) {
-				ret = ERANGE;
+				ret = -ERANGE;
 			}
-		} else {
-			errno = 0;
 		}
 		return ( ret );
 		M_EPILOG
@@ -353,8 +342,7 @@ private:
 		HXml::HNodeProxy n( _image.get_root() );
 		for ( HString const& name : path ) {
 			if ( ( name == "." ) || ( name == ".." ) ) {
-				errno = EINVAL;
-				throw HFileSystemException( "Bogus path component: "_ys.append( path_ ).append( ": " ).append( name ) );
+				throw HFileSystemException( "Bogus path component: "_ys.append( path_ ).append( ": " ).append( name ), -EINVAL );
 			}
 			bool found( false );
 			for ( HXml::HNodeProxy c : n ) {
@@ -366,8 +354,7 @@ private:
 				}
 			}
 			if ( ! found ) {
-				errno = ENOENT;
-				throw HFileSystemException( "No such file or directory: "_ys.append( path_ ) );
+				throw HFileSystemException( "No such file or directory: "_ys.append( path_ ), -ENOENT );
 			}
 		}
 		return ( n );
@@ -483,8 +470,8 @@ int getattr( char const* path_, struct stat* stat_ ) {
 	try {
 		_fs_->getattr( path_, stat_ );
 	} catch ( HException const& e ) {
-		ret = errno;
-		log( LOG_TYPE::ERROR ) << e.what() << ", " << errno << endl;
+		ret = e.code();
+		log( LOG_TYPE::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
 	return ( ret );
 }
@@ -593,7 +580,7 @@ int getxattr( char const* path_, char const* name_, char* buffer_, size_t size_ 
 	try {
 		ret = _fs_->getxattr( path_, name_, buffer_, size_ );
 	} catch ( HException const& e ) {
-		ret = errno;
+		ret = e.code();
 		log( LOG_TYPE::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
@@ -607,7 +594,7 @@ int listxattr( char const* path_, char* buffer_, size_t size_ ) {
 	try {
 		ret = _fs_->listxattr( path_, buffer_, size_ );
 	} catch ( HException const& e ) {
-		ret = errno;
+		ret = e.code();
 		log( LOG_TYPE::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
@@ -626,7 +613,7 @@ int opendir( char const* path_, struct fuse_file_info* info_ ) {
 	try {
 		info_->fh = _fs_->opendir( path_ );
 	} catch ( HException const& e ) {
-		ret = errno;
+		ret = e.code();
 		log( LOG_TYPE::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
@@ -641,7 +628,7 @@ int readdir( char const*, void* buffer_, fuse_fill_dir_t filler_,
 	try {
 		_fs_->readdir( buffer_, filler_, offset_, info_ );
 	} catch ( HException const& e ) {
-		ret = errno;
+		ret = e.code();
 		log( LOG_TYPE::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
@@ -655,7 +642,7 @@ int releasedir( char const* path_, struct fuse_file_info* info_ ) {
 	try {
 		_fs_->releasedir( info_->fh );
 	} catch ( HException const& e ) {
-		ret = errno;
+		ret = e.code();
 		log( LOG_TYPE::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
@@ -704,7 +691,7 @@ int access( char const* path_, int mode_ ) {
 	try {
 		ret = _fs_->access( path_, mode_ );
 	} catch ( HException const& e ) {
-		ret = errno;
+		ret = e.code();
 		log( LOG_TYPE::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
