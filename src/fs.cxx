@@ -207,7 +207,7 @@ public:
 		M_PROLOG
 		HLock l( _mutex );
 		HXml::HNodeProxy n( get_node_by_path( path_ ) );
-		HXml::HNode::properties_t& p( n.properties() );
+//		HXml::HNode::properties_t& p( n.properties() );
 		mode_t mode( get_mode( n ) );
 		uid_t u( get_user( n ) );
 		gid_t g( get_group( n ) );
