@@ -66,10 +66,10 @@ int main( int argc_, char* argv_[] ) {
 		rotate( argv_, argv_ + 1, argv_ + argc );
 		-- argc;
 		xmlfs::main( argc_ - argc, argv_ + argc );
+		cerr << _( "Done" ) << endl;
 	} catch ( int e ) {
 		err = e;
 	}
-	cerr << _( "Done" ) << endl;
 	return ( err );
 	M_FINAL
 }
