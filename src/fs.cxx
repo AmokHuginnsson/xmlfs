@@ -1,7 +1,7 @@
 /*
 ---           `xmlfs' 0.0.0 (c) 1978 by Marcin 'Amok' Konarski            ---
 
-	fs.cxx - this file is integral part of `xmlfs' project.
+  fs.cxx - this file is integral part of `xmlfs' project.
 
   i.  You may not make any changes in Copyright information.
   ii. You must attach Copyright information to any part of every copy
@@ -42,7 +42,7 @@ Copyright:
 #include <yaal/tools/filesystem.hxx>
 #include <yaal/tools/streamtools.hxx>
 #include <yaal/tools/stringalgo.hxx>
-//M_VCSID( "$Id: " __ID__ " $" )
+M_VCSID( "$Id: " __ID__ " $" )
 //M_VCSID( "$Id: " __TID__ " $" )
 #include "config.hxx"
 #include "fs.hxx"
@@ -283,7 +283,7 @@ public:
 		if ( ok ) {
 			ret = static_cast<int>( n.get_value().get_size() );
 			if ( ret <= static_cast<int>( size_ ) ) {
-				::memcpy( buffer_, n.get_value().c_str(), ret );
+				::memcpy( buffer_, n.get_value().c_str(), static_cast<int unsigned>( ret ) );
 			} else if ( static_cast<int>( size_ ) > 0 ) {
 				ret = -ERANGE;
 			}
@@ -320,7 +320,7 @@ public:
 			if ( total <= static_cast<int>( size_ ) ) {
 				int offset( 0 );
 				for ( HString const* s : names ) {
-					::memcpy( buffer_ + offset, s->c_str(), s->get_size() );
+					::memcpy( buffer_ + offset, s->c_str(), static_cast<int unsigned>( s->get_size() ) );
 					buffer_[offset] = 0;
 					offset += static_cast<int>( s->get_size() );
 					++ offset;
@@ -395,8 +395,8 @@ private:
 			stat_->st_nlink = 1;
 		} else if ( type == FILE::TYPE::DIRECTORY ) {
 			stat_->st_mode = S_IFDIR;
-			stat_->st_nlink = get_hard_link_count( n_ );
-			stat_->st_size = ( stat_->st_nlink ) * 160;
+			stat_->st_nlink = static_cast<nlink_t>( get_hard_link_count( n_ ) );
+			stat_->st_size = static_cast<off_t>( ( stat_->st_nlink ) * 160 );
 		} else if ( type == FILE::TYPE::SYMLINK ) {
 			stat_->st_mode = S_IFLNK;
 			stat_->st_size = p.at( FILE::PROPERTY::SYMLINK ).get_length();

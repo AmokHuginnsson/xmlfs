@@ -1,7 +1,7 @@
 /*
 ---           `xmlfs' 0.0.0 (c) 1978 by Marcin 'Amok' Konarski            ---
 
-	setup.cxx - this file is integral part of `xmlfs' project.
+  setup.cxx - this file is integral part of `xmlfs' project.
 
   i.  You may not make any changes in Copyright information.
   ii. You must attach Copyright information to any part of every copy
@@ -26,6 +26,7 @@ Copyright:
 
 #include <cstdio>
 
+#include <yaal/hcore/hfile.hxx>
 #include <yaal/tools/util.hxx>
 M_VCSID( "$Id: " __ID__ " $" )
 #include "setup.hxx"
