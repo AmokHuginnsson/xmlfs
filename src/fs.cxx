@@ -142,7 +142,7 @@ public:
 	virtual ~HFileSystem( void ) {
 		M_PROLOG
 		if ( ! _directoryScans.is_empty() ) {
-			log( LOG_TYPE::ERROR ) << "opendir leak!" << endl;
+			log( LOG_LEVEL::ERROR ) << "opendir leak!" << endl;
 		}
 		return;
 		M_DESTRUCTOR_EPILOG
@@ -424,7 +424,7 @@ private:
 		mode_t const lockOutUmask( S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH );
 		mode_t curUmask( ::umask( lockOutUmask ) );
 		if ( ::umask( curUmask ) != lockOutUmask ) {
-			log( LOG_TYPE::ERROR ) << SYSCALL_FAILURE << endl;
+			log( LOG_LEVEL::ERROR ) << SYSCALL_FAILURE << endl;
 			exit( 1 );
 		}
 		return ( curUmask );
@@ -471,7 +471,7 @@ int getattr( char const* path_, struct stat* stat_ ) {
 		_fs_->getattr( path_, stat_ );
 	} catch ( HException const& e ) {
 		ret = e.code();
-		log( LOG_TYPE::ERROR ) << e.what() << ", " << -e.code() << endl;
+		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
 	return ( ret );
 }
@@ -581,7 +581,7 @@ int getxattr( char const* path_, char const* name_, char* buffer_, size_t size_ 
 		ret = _fs_->getxattr( path_, name_, buffer_, size_ );
 	} catch ( HException const& e ) {
 		ret = e.code();
-		log( LOG_TYPE::ERROR ) << e.what() << endl;
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
 }
@@ -595,7 +595,7 @@ int listxattr( char const* path_, char* buffer_, size_t size_ ) {
 		ret = _fs_->listxattr( path_, buffer_, size_ );
 	} catch ( HException const& e ) {
 		ret = e.code();
-		log( LOG_TYPE::ERROR ) << e.what() << endl;
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
 }
@@ -614,7 +614,7 @@ int opendir( char const* path_, struct fuse_file_info* info_ ) {
 		info_->fh = _fs_->opendir( path_ );
 	} catch ( HException const& e ) {
 		ret = e.code();
-		log( LOG_TYPE::ERROR ) << e.what() << endl;
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
 }
@@ -629,7 +629,7 @@ int readdir( char const*, void* buffer_, fuse_fill_dir_t filler_,
 		_fs_->readdir( buffer_, filler_, offset_, info_ );
 	} catch ( HException const& e ) {
 		ret = e.code();
-		log( LOG_TYPE::ERROR ) << e.what() << endl;
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
 }
@@ -643,7 +643,7 @@ int releasedir( char const* path_, struct fuse_file_info* info_ ) {
 		_fs_->releasedir( info_->fh );
 	} catch ( HException const& e ) {
 		ret = e.code();
-		log( LOG_TYPE::ERROR ) << e.what() << endl;
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
 }
@@ -663,7 +663,7 @@ void* init( struct fuse_conn_info* info_ ) {
 	try {
 		_fs_ = make_pointer<HFileSystem>( setup._fsFilePath );
 	} catch ( HException const& e ) {
-		log( LOG_TYPE::ERROR ) << e.what() << endl;
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 		exit( 1 );
 	}
 	return ( nullptr );
@@ -677,7 +677,7 @@ void destroy( void * ) {
 		_fs_->save();
 		_fs_.reset();
 	} catch ( HException const& e ) {
-		log( LOG_TYPE::ERROR ) << e.what() << endl;
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 		exit( 1 );
 	}
 	return;
@@ -692,7 +692,7 @@ int access( char const* path_, int mode_ ) {
 		ret = _fs_->access( path_, mode_ );
 	} catch ( HException const& e ) {
 		ret = e.code();
-		log( LOG_TYPE::ERROR ) << e.what() << endl;
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
 	return ( ret );
 }
