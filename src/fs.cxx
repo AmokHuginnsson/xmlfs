@@ -35,11 +35,13 @@ Copyright:
 #include <sys/xattr.h>
 
 #include <yaal/config.hxx>
+#include <yaal/hcore/hstack.hxx>
 #include <yaal/hcore/htime.hxx>
 #include <yaal/hcore/hthread.hxx>
 #include <yaal/hcore/hlog.hxx>
 #include <yaal/tools/hxml.hxx>
 #include <yaal/tools/filesystem.hxx>
+#include <yaal/tools/hstringstream.hxx>
 #include <yaal/tools/streamtools.hxx>
 #include <yaal/tools/stringalgo.hxx>
 M_VCSID( "$Id: " __ID__ " $" )
@@ -51,31 +53,38 @@ M_VCSID( "$Id: " __ID__ " $" )
 using namespace yaal;
 using namespace yaal::hcore;
 using namespace yaal::tools;
+using namespace yaal::tools::filesystem;
 
 namespace xmlfs {
 
 class HFileSystem;
 typedef yaal::hcore::HExceptionT<HFileSystem> HFileSystemException;
 
-class HFileSystem {
+class HFileSystem final {
 public:
 	typedef HFileSystem this_type;
 	typedef yaal::hcore::HPointer<HFileSystem> ptr_t;
 private:
 	yaal::tools::filesystem::path_t _imagePath;
 	yaal::tools::HXml _image;
+	dev_t _devId;
 	typedef yaal::u64_t handle_t;
-	typedef yaal::hcore::HHashMap<handle_t, tools::HXml::HConstNodeProxy> directory_scans_t;
-	directory_scans_t _directoryScans;
+	typedef yaal::hcore::HHashMap<handle_t, tools::HXml::HConstNodeProxy> descriptors_t;
+	typedef yaal::hcore::HStack<handle_t> available_descriptors_t;
+	descriptors_t _descriptors;
 	bool _synced;
-	yaal::hcore::HMutex _mutex;
 	typedef std::atomic<u64_t> inode_generator_t;
-	typedef std::atomic<u64_t> operation_id_generator_t;
-	static inode_generator_t _inodeGenerator;
-	static operation_id_generator_t _operationIdGenerator;
+	typedef std::atomic<handle_t> descriptor_generator_t;
+	inode_generator_t _inodeGenerator;
+	descriptor_generator_t _descriptorGenerator;
+	available_descriptors_t _availableDescriptors;
+	mutable yaal::hcore::HMutex _mutex;
 	static yaal::hcore::HString const ROOT_NODE;
+	static blksize_t const BLOCK_SIZE = 512;
+	static handle_t const INVALID_HANDLE = static_cast<handle_t>( -1 );
 	struct FILE {
 		struct PROPERTY {
+			static yaal::hcore::HString const DEV_ID;
 			static yaal::hcore::HString const INODE;
 			static yaal::hcore::HString const INODE_NEXT;
 			static yaal::hcore::HString const NAME;
@@ -108,11 +117,15 @@ private:
 	};
 public:
 	HFileSystem( yaal::hcore::HString const& imagePath_ )
-		: _imagePath( imagePath_ ),
-		_image(),
-		_directoryScans(),
-		_synced( false ),
-		_mutex() {
+		: _imagePath( imagePath_ )
+		, _image()
+		, _devId( 0 )
+		, _descriptors()
+		, _synced( false )
+		, _inodeGenerator( 0 )
+		, _descriptorGenerator( 0 )
+		, _availableDescriptors()
+		, _mutex() {
 		M_PROLOG
 		if ( filesystem::exists( _imagePath ) ) {
 			_image.load( tools::ensure( make_pointer<HFile>( _imagePath, HFile::OPEN::READING ) ) );
@@ -120,7 +133,9 @@ public:
 			HXml::HConstNodeProxy n( _image.get_root() );
 			HXml::HNode::properties_t const& p( n.properties() );
 			_inodeGenerator.store( lexical_cast<u64_t>( p.at( FILE::PROPERTY::INODE_NEXT ) ) );
+			_devId = lexical_cast<dev_t>( p.at( FILE::PROPERTY::DEV_ID ) );
 		} else {
+			log( LOG_LEVEL::WARNING ) << "Creating new, empty file system at: " << _imagePath << endl;
 			_image.create_root( FILE::TYPE::DIRECTORY );
 			HXml::HNodeProxy root( _image.get_root() );
 			HTime now( HTime::TZ::LOCAL );
@@ -133,16 +148,19 @@ public:
 			p.insert( make_pair( FILE::PROPERTY::MODE, mode ) );
 			p.insert( make_pair( FILE::PROPERTY::USER, to_string( getuid() ) ) );
 			p.insert( make_pair( FILE::PROPERTY::GROUP, to_string( getgid() ) ) );
+			_inodeGenerator.store( 1 );
+			_devId = randomizer_helper::make_randomizer()();
 			p.insert( make_pair( FILE::PROPERTY::INODE, to_string( _inodeGenerator ++ ) ) );
 			p.insert( make_pair( FILE::PROPERTY::INODE_NEXT, to_string( _inodeGenerator.load() ) ) );
+			_synced = false;
 		}
 		return;
 		M_EPILOG
 	}
-	virtual ~HFileSystem( void ) {
+	~HFileSystem( void ) {
 		M_PROLOG
-		if ( ! _directoryScans.is_empty() ) {
-			log( LOG_LEVEL::ERROR ) << "opendir leak!" << endl;
+		if ( ! _descriptors.is_empty() ) {
+			log( LOG_LEVEL::ERROR ) << "descriptor leak!" << endl;
 		}
 		return;
 		M_DESTRUCTOR_EPILOG
@@ -151,6 +169,8 @@ public:
 		M_PROLOG
 		HLock l( _mutex );
 		if ( ! _synced ) {
+			HXml::HNodeProxy n( _image.get_root() );
+			n.properties()[FILE::PROPERTY::INODE_NEXT] = _inodeGenerator.load();
 			_image.save( tools::ensure( make_pointer<HFile>( _imagePath, HFile::OPEN::WRITING | HFile::OPEN::TRUNCATE ) ) );
 			_synced = true;
 		}
@@ -160,45 +180,64 @@ public:
 	handle_t opendir( tools::filesystem::path_t const& path_ ) {
 		M_PROLOG
 		HLock l( _mutex );
-		handle_t h( _operationIdGenerator ++ );
+		handle_t h( create_handle() );
 		HXml::HConstNodeProxy n( get_node_by_path( path_ ) );
 		if ( n.get_name() != FILE::TYPE::DIRECTORY ) {
 			throw HFileSystemException( "Path does not point to a directory: "_ys.append( path_ ), -ENOTDIR );
 		}
-		_directoryScans.insert( make_pair( h, n ) );
+		_descriptors.insert( make_pair( h, n ) );
 		return ( h );
 		M_EPILOG
 	}
 	void releasedir( handle_t handle_ ) {
 		M_PROLOG
 		HLock l( _mutex );
-		directory_scans_t::iterator it( _directoryScans.find( handle_ ) );
-		if ( ! ( it != _directoryScans.end() ) ) {
+		descriptors_t::iterator it( _descriptors.find( handle_ ) );
+		if ( ! ( it != _descriptors.end() ) ) {
+			throw HFileSystemException( "Invalid directory handle: "_ys.append( handle_ ), -EINVAL );
+		}
+		handle_t h( it->first );
+		_descriptors.erase( it );
+		release_handle( h );
+		return;
+		M_EPILOG
+	}
+	void release( handle_t handle_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		descriptors_t::iterator it( _descriptors.find( handle_ ) );
+		if ( ! ( it != _descriptors.end() ) ) {
 			throw HFileSystemException( "Invalid handle: "_ys.append( handle_ ), -EINVAL );
 		}
-		_directoryScans.erase( it );
+		handle_t h( it->first );
+		_descriptors.erase( it );
+		release_handle( h );
 		return;
 		M_EPILOG
 	}
 	void getattr( char const* path_, struct stat* stat_ ) {
 		M_PROLOG
 		HLock l( _mutex );
-		get_stat( get_node_by_path( path_ ), stat_ );
+		HXml::HConstNodeProxy n( get_node_by_path( path_ ) );
+		get_stat( n, stat_ );
 		return;
 		M_EPILOG
 	}
 	void readdir( void* buf_, fuse_fill_dir_t filler_,
-		off_t, struct fuse_file_info* info_ ) {
+		off_t, struct fuse_file_info* info_ ) const {
 		M_PROLOG
 		HLock l( _mutex );
-		HXml::HConstNodeProxy const& n( _directoryScans.at( info_->fh ) );
+		HXml::HConstNodeProxy const& n( _descriptors.at( info_->fh ) );
 		struct stat s;
 		get_stat( n, &s );
 		filler_( buf_, ".", &s, 0 );
 		filler_( buf_, "..", NULL, 0 );
 		for ( HXml::HConstNodeProxy const& c : n ) {
+			HString const& name( c.properties().at( FILE::PROPERTY::NAME ) );
 			get_stat( c, &s );
-			filler_( buf_, c.properties().at( FILE::PROPERTY::NAME ).c_str(), &s, 0 );
+			if ( filler_( buf_, name.c_str(), &s, 0 ) ) {
+				throw HFileSystemException( "Directory buffer is full." );
+			}
 		}
 		return;
 		M_EPILOG
@@ -207,39 +246,37 @@ public:
 		M_PROLOG
 		HLock l( _mutex );
 		HXml::HNodeProxy n( get_node_by_path( path_ ) );
-//		HXml::HNode::properties_t& p( n.properties() );
-		mode_t mode( get_mode( n ) );
-		uid_t u( get_user( n ) );
-		gid_t g( get_group( n ) );
-		int accessBit( 6 );
-		if ( getuid() != u ) {
-			accessBit -= 3;
-		}
-		if ( getgid() != g ) {
-			accessBit -= 3;
-		}
-		mode >>= accessBit;
-		bool ok( false );
-		do {
-			if ( mode_ & R_OK ) {
-				if ( ! ( mode & S_IROTH ) ) {
-					break;
-				}
-			}
-			if ( mode_ & W_OK ) {
-				if ( ! ( mode & S_IWOTH ) ) {
-					break;
-				}
-			}
-			if ( mode_ & X_OK ) {
-				if ( ! ( mode & S_IXOTH ) ) {
-					break;
-				}
-			}
-			ok = true;
-		} while ( false );
-		return ( ok ? 0 : -EACCES );
+		return ( have_access( n, mode_ ) ? 0 : -EACCES );
 		M_EPILOG
+	}
+	handle_t create( tools::filesystem::path_t const& path_, mode_t mode_ ) {
+		path_t bname( basename( path_ ) );
+		path_t dname( dirname( path_ ) );
+		HXml::HNodeProxy p( get_node_by_path( dname ) );
+		if ( p.get_name() != FILE::TYPE::DIRECTORY ) {
+			throw HFileSystemException( "Path does not point to a directory: "_ys.append( dname ), -ENOTDIR );
+		}
+		if ( ! have_access( p, W_OK | X_OK ) ) {
+			throw HFileSystemException( "You have no permission to modify parent directory.", -EACCES );
+		}
+		HXml::HNodeProxy n( *p.add_node( FILE::TYPE::PLAIN ) );
+		HXml::HNode::properties_t& a( n.properties() );
+		a.insert( make_pair( FILE::PROPERTY::NAME, bname ) );
+		HStringStream m;
+		m << "0" << oct << ( mode_ & 0777 );
+		a.insert( make_pair( FILE::PROPERTY::MODE, m.str() ) );
+		a.insert( make_pair( FILE::PROPERTY::SIZE, HString( "0" ) ) );
+		HString now( now_local().to_string() );
+		a.insert( make_pair( FILE::PROPERTY::TIME::CHANGE, now ) );
+		a.insert( make_pair( FILE::PROPERTY::TIME::MODIFICATION, now ) );
+		a.insert( make_pair( FILE::PROPERTY::TIME::ACCESS, now ) );
+		a.insert( make_pair( FILE::PROPERTY::USER, to_string( getuid() ) ) );
+		a.insert( make_pair( FILE::PROPERTY::GROUP, to_string( getgid() ) ) );
+		a.insert( make_pair( FILE::PROPERTY::INODE, to_string( _inodeGenerator ++ ) ) );
+		handle_t h( create_handle() );
+		_descriptors.insert( make_pair( h, n ) );
+		_synced = false;
+		return ( h );
 	}
 	int getxattr( char const* path_, HString const& name_, char* buffer_, size_t size_ ) {
 		M_PROLOG
@@ -335,6 +372,55 @@ public:
 private:
 	HFileSystem( HFileSystem const& ) = delete;
 	HFileSystem& operator = ( HFileSystem const& ) = delete;
+	handle_t create_handle( void ) {
+		handle_t h( INVALID_HANDLE );
+		if ( _availableDescriptors.is_empty() ) {
+			h = _descriptorGenerator ++;
+		} else {
+			h = _availableDescriptors.top();
+			_availableDescriptors.pop();
+		}
+		return ( h );
+	}
+	void release_handle( handle_t handle_ ) {
+		M_PROLOG
+		_availableDescriptors.push( handle_ );
+		return;
+		M_EPILOG
+	}
+	bool have_access( HXml::HConstNodeProxy const& fsElem_, int mode_ ) {
+		mode_t mode( get_mode( fsElem_ ) );
+		uid_t u( get_user( fsElem_ ) );
+		gid_t g( get_group( fsElem_ ) );
+		int accessBit( 6 );
+		if ( getuid() != u ) {
+			accessBit -= 3;
+		}
+		if ( getgid() != g ) {
+			accessBit -= 3;
+		}
+		mode >>= accessBit;
+		bool ok( false );
+		do {
+			if ( mode_ & R_OK ) {
+				if ( ! ( mode & S_IROTH ) ) {
+					break;
+				}
+			}
+			if ( mode_ & W_OK ) {
+				if ( ! ( mode & S_IWOTH ) ) {
+					break;
+				}
+			}
+			if ( mode_ & X_OK ) {
+				if ( ! ( mode & S_IXOTH ) ) {
+					break;
+				}
+			}
+			ok = true;
+		} while ( false );
+		return ( ok );
+	}
 	HXml::HNodeProxy get_node_by_path( tools::filesystem::path_t const& path_ ) {
 		M_PROLOG
 		typedef HArray<HString> components_t;
@@ -360,7 +446,7 @@ private:
 		return ( n );
 		M_EPILOG
 	}
-	int get_hard_link_count( HXml::HConstNodeProxy const& n_ ) {
+	int get_hard_link_count( HXml::HConstNodeProxy const& n_ ) const {
 		int hlc( 2 );
 		for ( HXml::HConstNodeProxy const& c : n_ ) {
 			if ( c.get_name() == FILE::TYPE::DIRECTORY ) {
@@ -384,11 +470,12 @@ private:
 		return ( lexical_cast<mode_t>( n_.properties().at( FILE::PROPERTY::MODE ) ) );
 		M_EPILOG
 	}
-	void get_stat( HXml::HConstNodeProxy const& n_, struct stat* stat_ ) {
+	void get_stat( HXml::HConstNodeProxy const& n_, struct stat* stat_ ) const {
 		M_PROLOG
 		::memset( stat_, 0, sizeof ( *stat_ ) );
 		HXml::HNode::properties_t const& p( n_.properties() );
 		HString type( n_.get_name() );
+		stat_->st_dev = _devId;
 		if ( type == FILE::TYPE::PLAIN ) {
 			stat_->st_mode = S_IFREG;
 			stat_->st_size = lexical_cast<i64_t>( p.at( FILE::PROPERTY::SIZE ) );
@@ -408,7 +495,12 @@ private:
 			stat_->st_mode = S_IFBLK;
 		} else if ( type == FILE::TYPE::DEVICE::CHARACTER ) {
 			stat_->st_mode = S_IFCHR;
+		} else {
+			throw HFileSystemException( "Bad file type: "_ys.append( type ) );
 		}
+		stat_->st_blksize = BLOCK_SIZE;
+		stat_->st_blocks = ( stat_->st_size + BLOCK_SIZE - 1 ) / BLOCK_SIZE;
+
 		stat_->st_ino = lexical_cast<ino_t>( p.at( FILE::PROPERTY::INODE ) );
 		stat_->st_uid = lexical_cast<uid_t>( p.at( FILE::PROPERTY::USER ) );
 		stat_->st_gid = lexical_cast<uid_t>( p.at( FILE::PROPERTY::GROUP ) );
@@ -434,9 +526,8 @@ private:
 		return ( fullMode & ~get_umask() );
 	}
 };
-HFileSystem::operation_id_generator_t HFileSystem::_inodeGenerator( 0 );
-HFileSystem::operation_id_generator_t HFileSystem::_operationIdGenerator( 0 );
 yaal::hcore::HString const HFileSystem::ROOT_NODE( "root" );
+yaal::hcore::HString const HFileSystem::FILE::PROPERTY::DEV_ID( "dev_id" );
 yaal::hcore::HString const HFileSystem::FILE::PROPERTY::INODE( "id" );
 yaal::hcore::HString const HFileSystem::FILE::PROPERTY::INODE_NEXT( "inode_next" );
 yaal::hcore::HString const HFileSystem::FILE::PROPERTY::NAME( "name" );
@@ -448,7 +539,7 @@ yaal::hcore::HString const HFileSystem::FILE::PROPERTY::TIME::MODIFICATION( "mti
 yaal::hcore::HString const HFileSystem::FILE::PROPERTY::TIME::CHANGE( "ctime" );
 yaal::hcore::HString const HFileSystem::FILE::PROPERTY::TIME::ACCESS( "atime" );
 yaal::hcore::HString const HFileSystem::FILE::PROPERTY::SYMLINK( "symlink" );
-yaal::hcore::HString const HFileSystem::FILE::TYPE::PLAIN( "plain" );
+yaal::hcore::HString const HFileSystem::FILE::TYPE::PLAIN( "file" );
 yaal::hcore::HString const HFileSystem::FILE::TYPE::DIRECTORY( "dir" );
 yaal::hcore::HString const HFileSystem::FILE::TYPE::SYMLINK( "symlink" );
 yaal::hcore::HString const HFileSystem::FILE::TYPE::SOCKET( "socket" );
@@ -557,9 +648,18 @@ int flush( char const*, struct fuse_file_info* ) {
 	return ( -1 );
 }
 
-int release( char const*, struct fuse_file_info* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int release( char const* path_, struct fuse_file_info* info_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->release( info_->fh );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int fsync( char const*, int, struct fuse_file_info* ) {
@@ -697,9 +797,18 @@ int access( char const* path_, int mode_ ) {
 	return ( ret );
 }
 
-int create( char const*, mode_t, struct fuse_file_info* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int create( char const* path_, mode_t mode_, struct fuse_file_info* info_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		info_->fh = _fs_->create( path_, mode_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int ftruncate( char const*, off_t, struct fuse_file_info* ) {

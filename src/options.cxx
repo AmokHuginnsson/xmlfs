@@ -68,7 +68,7 @@ void version( void ) {
 int handle_program_options( int argc_, char** argv_ ) {
 	M_PROLOG
 	HProgramOptionsHandler po;
-	OOptionInfo info( po, setup._programName, "does very much usefull things ... really", NULL );
+	OOptionInfo info( po, setup._programName, "XML based file system in user space", NULL );
 	bool help( false );
 	bool conf( false );
 	bool vers( false );
