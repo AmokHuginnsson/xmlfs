@@ -44,6 +44,8 @@ Copyright:
 #include <yaal/tools/hstringstream.hxx>
 #include <yaal/tools/streamtools.hxx>
 #include <yaal/tools/stringalgo.hxx>
+#include <yaal/tools/hmemory.hxx>
+#include <yaal/tools/base64.hxx>
 M_VCSID( "$Id: " __ID__ " $" )
 //M_VCSID( "$Id: " __TID__ " $" )
 #include "config.hxx"
@@ -64,12 +66,75 @@ class HFileSystem final {
 public:
 	typedef HFileSystem this_type;
 	typedef yaal::hcore::HPointer<HFileSystem> ptr_t;
+	class HDescriptor final {
+		tools::HXml::HNodeProxy _node;
+		yaal::hcore::HChunk _data;
+		int _size;
+		yaal::hcore::HChunk _encoded;
+	public:
+		HDescriptor( tools::HXml::HNodeProxy const& node_ )
+			: _node( node_ )
+			, _data()
+			, _size()
+			, _encoded() {
+			if ( is_plain( _node ) ) {
+				_size = lexical_cast<int>( _node.properties().at( FILE::PROPERTY::SIZE ) );
+			} else {
+				_size = get_hard_link_count( _node );
+			}
+			return;
+		}
+		HDescriptor( HDescriptor&& ) = default;
+		HDescriptor& operator = ( HDescriptor&& ) = default;
+		HXml::HNodeProxy& node( void ) {
+			return ( _node );
+		}
+		HXml::HConstNodeProxy const& node( void ) const {
+			return ( _node );
+		}
+		int size( void ) const {
+			return ( _size );
+		}
+		void flush( void ) {
+			M_PROLOG
+			if ( is_plain( _node ) ) {
+				int oldSize( lexical_cast<int>( _node.properties().at( FILE::PROPERTY::SIZE ) ) );
+				HXml::HNodeProxy value;
+				if ( oldSize > 0 ) {
+					HXml::HIterator valueIt = _node.begin();
+					if ( _size > 0 ) {
+						value = *valueIt;
+					} else {
+						_node.remove_node( valueIt );
+					}
+				} else {
+					if ( _size > 0 ) {
+						value = *_node.add_node( HXml::HNode::TYPE::CONTENT );
+					}
+				}
+				if ( _size > 0 ) {
+					HMemoryProvider srcMem( _data, _size );
+					HMemoryProvider dstMem( _encoded, 0 );
+					HMemory src( srcMem );
+					HMemory dst( dstMem );
+					base64::encode( src, dst );
+					value.set_value( _encoded.get<char>() );
+				}
+				_node.properties()[ FILE::PROPERTY::SIZE ] = _size;
+			}
+			return;
+			M_EPILOG
+		}
+	private:
+		HDescriptor( HDescriptor const& ) = delete;
+		HDescriptor& operator = ( HDescriptor const& ) = delete;
+	};
 private:
 	yaal::tools::filesystem::path_t _imagePath;
 	yaal::tools::HXml _image;
 	dev_t _devId;
 	typedef yaal::u64_t handle_t;
-	typedef yaal::hcore::HHashMap<handle_t, tools::HXml::HConstNodeProxy> descriptors_t;
+	typedef yaal::hcore::HHashMap<handle_t, HDescriptor> descriptors_t;
 	typedef yaal::hcore::HStack<handle_t> available_descriptors_t;
 	descriptors_t _descriptors;
 	bool _synced;
@@ -181,11 +246,11 @@ public:
 		M_PROLOG
 		HLock l( _mutex );
 		handle_t h( create_handle() );
-		HXml::HConstNodeProxy n( get_node_by_path( path_ ) );
+		HXml::HNodeProxy n( get_node_by_path( path_ ) );
 		if ( n.get_name() != FILE::TYPE::DIRECTORY ) {
 			throw HFileSystemException( "Path does not point to a directory: "_ys.append( path_ ), -ENOTDIR );
 		}
-		_descriptors.insert( make_pair( h, n ) );
+		_descriptors.insert( descriptors_t::value_type( h, HDescriptor( n ) ) );
 		return ( h );
 		M_EPILOG
 	}
@@ -226,7 +291,7 @@ public:
 	void fgetattr( struct fuse_file_info* info_, struct stat* stat_ ) const {
 		M_PROLOG
 		HLock l( _mutex );
-		HXml::HConstNodeProxy const& n( _descriptors.at( info_->fh ) );
+		HXml::HConstNodeProxy const& n( _descriptors.at( info_->fh ).node() );
 		get_stat( n, stat_ );
 		return;
 		M_EPILOG
@@ -235,7 +300,7 @@ public:
 		off_t, struct fuse_file_info* info_ ) const {
 		M_PROLOG
 		HLock l( _mutex );
-		HXml::HConstNodeProxy const& n( _descriptors.at( info_->fh ) );
+		HXml::HConstNodeProxy const& n( _descriptors.at( info_->fh ).node() );
 		struct stat s;
 		get_stat( n, &s );
 		filler_( buf_, ".", &s, 0 );
@@ -416,6 +481,13 @@ public:
 		return;
 		M_EPILOG
 	}
+	void flush( handle_t handle_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		_descriptors.at( handle_ ).flush();
+		return;
+		M_EPILOG
+	}
 private:
 	HFileSystem( HFileSystem const& ) = delete;
 	HFileSystem& operator = ( HFileSystem const& ) = delete;
@@ -506,7 +578,7 @@ private:
 	HXml::HConstNodeProxy get_node_by_path( tools::filesystem::path_t const& path_ ) const {
 		return ( const_cast<HFileSystem*>( this )->get_node_by_path( path_ ) );
 	}
-	int get_hard_link_count( HXml::HConstNodeProxy const& n_ ) const {
+	static int get_hard_link_count( HXml::HConstNodeProxy const& n_ ) {
 		int hlc( 2 );
 		for ( HXml::HConstNodeProxy const& c : n_ ) {
 			if ( c.get_name() == FILE::TYPE::DIRECTORY ) {
@@ -590,9 +662,9 @@ private:
 		HXml::HNodeProxy n( *parent_.add_node( type_ ) );
 		HXml::HNode::properties_t& a( n.properties() );
 		a.insert( make_pair( FILE::PROPERTY::NAME, name_ ) );
-		HStringStream m;
-		m << "0" << oct << ( mode_ & 0777 );
-		a.insert( make_pair( FILE::PROPERTY::MODE, m.str() ) );
+		HString mode;
+		mode.format( "%04o", ( mode_ & 0777 ) );
+		a.insert( make_pair( FILE::PROPERTY::MODE, mode ) );
 		a.insert( make_pair( FILE::PROPERTY::SIZE, HString( "0" ) ) );
 		HString now( now_local().to_string() );
 		a.insert( make_pair( FILE::PROPERTY::TIME::CHANGE, now ) );
@@ -603,6 +675,12 @@ private:
 		a.insert( make_pair( FILE::PROPERTY::INODE, to_string( _inodeGenerator ++ ) ) );
 		return ( n );
 		M_EPILOG
+	}
+	static bool is_plain( HXml::HConstNodeProxy const& node_ ) {
+		return ( node_.get_name() == FILE::TYPE::PLAIN );
+	}
+	static bool is_directory( HXml::HConstNodeProxy const& node_ ) {
+		return ( node_.get_name() == FILE::TYPE::PLAIN );
 	}
 };
 yaal::hcore::HString const HFileSystem::ROOT_NODE( "root" );
@@ -740,9 +818,18 @@ int statfs( char  const*, struct statvfs * ) {
 	return ( -1 );
 }
 
-int flush( char const*, struct fuse_file_info* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int flush( char const* path_, struct fuse_file_info* info_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->flush( info_->fh );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int release( char const* path_, struct fuse_file_info* info_ ) {
