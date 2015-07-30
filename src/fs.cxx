@@ -66,17 +66,20 @@ class HFileSystem final {
 public:
 	typedef HFileSystem this_type;
 	typedef yaal::hcore::HPointer<HFileSystem> ptr_t;
+	static int const NO_OWNER = -1;
 	class HDescriptor final {
 		tools::HXml::HNodeProxy _node;
 		yaal::hcore::HChunk _data;
 		int _size;
 		yaal::hcore::HChunk _encoded;
+		pid_t _owner;
 	public:
 		HDescriptor( tools::HXml::HNodeProxy const& node_ )
 			: _node( node_ )
 			, _data()
 			, _size()
-			, _encoded() {
+			, _encoded()
+			, _owner( NO_OWNER ) {
 			if ( is_plain( _node ) ) {
 				_size = lexical_cast<int>( _node.properties().at( FILE::PROPERTY::SIZE ) );
 			} else {
@@ -124,6 +127,38 @@ public:
 			}
 			return;
 			M_EPILOG
+		}
+		void lock( int cmd_, struct flock* lock_ ) {
+			if ( _owner > NO_OWNER ) {
+				if ( cmd_ == F_GETLK ) {
+					lock_->l_pid = _owner;
+					lock_->l_type = F_WRLCK;
+					lock_->l_whence = SEEK_SET;
+					lock_->l_start = 0;
+					lock_->l_len = _size;
+				} else {
+					if ( lock_->l_pid != _owner ) {
+						throw HFileSystemException( "Locked by another process: "_ys.append( _owner ), -EACCES );
+					} else if ( lock_->l_type != F_UNLCK ) {
+						throw HFileSystemException( "File already locked", -EINVAL );
+					} else {
+						_owner = NO_OWNER;
+					}
+				}
+			} else {
+				switch ( cmd_ ) {
+					case ( F_GETLK ): {
+						lock_->l_type = F_UNLCK;
+					} break;
+					case ( F_SETLK ):
+					case ( F_SETLKW ): {
+						_owner = lock_->l_pid;
+					} break;
+					default: {
+						throw HFileSystemException( "Invalid lock command.", -EINVAL );
+					}
+				}
+			}
 		}
 	private:
 		HDescriptor( HDescriptor const& ) = delete;
@@ -257,26 +292,16 @@ public:
 	void releasedir( handle_t handle_ ) {
 		M_PROLOG
 		HLock l( _mutex );
-		descriptors_t::iterator it( _descriptors.find( handle_ ) );
-		if ( ! ( it != _descriptors.end() ) ) {
-			throw HFileSystemException( "Invalid directory handle: "_ys.append( handle_ ), -EINVAL );
-		}
-		handle_t h( it->first );
-		_descriptors.erase( it );
-		release_handle( h );
+		_descriptors.erase( descriptor_iterator( handle_ ) );
+		release_handle( handle_ );
 		return;
 		M_EPILOG
 	}
 	void release( handle_t handle_ ) {
 		M_PROLOG
 		HLock l( _mutex );
-		descriptors_t::iterator it( _descriptors.find( handle_ ) );
-		if ( ! ( it != _descriptors.end() ) ) {
-			throw HFileSystemException( "Invalid handle: "_ys.append( handle_ ), -EINVAL );
-		}
-		handle_t h( it->first );
-		_descriptors.erase( it );
-		release_handle( h );
+		_descriptors.erase( descriptor_iterator( handle_ ) );
+		release_handle( handle_ );
 		return;
 		M_EPILOG
 	}
@@ -288,19 +313,18 @@ public:
 		return;
 		M_EPILOG
 	}
-	void fgetattr( struct fuse_file_info* info_, struct stat* stat_ ) const {
+	void fgetattr( handle_t handle_, struct stat* stat_ ) const {
 		M_PROLOG
 		HLock l( _mutex );
-		HXml::HConstNodeProxy const& n( _descriptors.at( info_->fh ).node() );
-		get_stat( n, stat_ );
+		get_stat( descriptor( handle_ ).node(), stat_ );
 		return;
 		M_EPILOG
 	}
 	void readdir( void* buf_, fuse_fill_dir_t filler_,
-		off_t, struct fuse_file_info* info_ ) const {
+		off_t, handle_t handle_ ) const {
 		M_PROLOG
 		HLock l( _mutex );
-		HXml::HConstNodeProxy const& n( _descriptors.at( info_->fh ).node() );
+		HXml::HConstNodeProxy const& n( descriptor( handle_ ).node() );
 		struct stat s;
 		get_stat( n, &s );
 		filler_( buf_, ".", &s, 0 );
@@ -484,7 +508,14 @@ public:
 	void flush( handle_t handle_ ) {
 		M_PROLOG
 		HLock l( _mutex );
-		_descriptors.at( handle_ ).flush();
+		descriptor( handle_ ).flush();
+		return;
+		M_EPILOG
+	}
+	void lock( handle_t handle_, int cmd_, struct flock* lock_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		descriptor( handle_ ).lock( cmd_, lock_ );
 		return;
 		M_EPILOG
 	}
@@ -505,6 +536,33 @@ private:
 		M_PROLOG
 		_availableDescriptors.push( handle_ );
 		return;
+		M_EPILOG
+	}
+	descriptors_t::iterator descriptor_iterator( handle_t handle_ ) {
+		M_PROLOG
+		descriptors_t::iterator it( _descriptors.find( handle_ ) );
+		if ( ! ( it != _descriptors.end() ) ) {
+			throw HFileSystemException( "Invalid handle: "_ys.append( handle_ ), -EBADF );
+		}
+		return ( it );
+		M_EPILOG
+	}
+	HDescriptor& descriptor( handle_t handle_ ) {
+		M_PROLOG
+		descriptors_t::iterator it( _descriptors.find( handle_ ) );
+		if ( ! ( it != _descriptors.end() ) ) {
+			throw HFileSystemException( "Invalid handle: "_ys.append( handle_ ), -EBADF );
+		}
+		return ( it->second );
+		M_EPILOG
+	}
+	HDescriptor const& descriptor( handle_t handle_ ) const {
+		M_PROLOG
+		descriptors_t::const_iterator it( _descriptors.find( handle_ ) );
+		if ( ! ( it != _descriptors.end() ) ) {
+			throw HFileSystemException( "Invalid handle: "_ys.append( handle_ ), -EBADF );
+		}
+		return ( it->second );
 		M_EPILOG
 	}
 	bool have_access( HXml::HConstNodeProxy const& fsElem_, int mode_ ) const {
@@ -903,14 +961,14 @@ int opendir( char const* path_, struct fuse_file_info* info_ ) {
 	return ( ret );
 }
 
-int readdir( char const*, void* buffer_, fuse_fill_dir_t filler_,
+int readdir( char const* path_, void* buffer_, fuse_fill_dir_t filler_,
 	off_t offset_, struct fuse_file_info* info_ ) {
 	if ( setup._debug ) {
-		log_trace << info_->fh << endl;
+		log_trace << path_ << "(" << info_->fh << ")" << endl;
 	}
 	int ret( 0 );
 	try {
-		_fs_->readdir( buffer_, filler_, offset_, info_ );
+		_fs_->readdir( buffer_, filler_, offset_, info_->fh );
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
@@ -1006,7 +1064,7 @@ int fgetattr( char const* path_, struct stat* stat_, struct fuse_file_info* info
 	}
 	int ret( 0 );
 	try {
-		_fs_->fgetattr( info_, stat_ );
+		_fs_->fgetattr( info_->fh, stat_ );
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
@@ -1014,9 +1072,18 @@ int fgetattr( char const* path_, struct stat* stat_, struct fuse_file_info* info
 	return ( ret );
 }
 
-int lock( char const*, struct fuse_file_info*, int, struct flock* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int lock( char const* path_, struct fuse_file_info* info_, int cmd_, struct flock* lock_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->lock( info_->fh, cmd_, lock_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
+	}
+	return ( ret );
 }
 
 int utimens( char const* path_, struct timespec const time_[2] ) {
