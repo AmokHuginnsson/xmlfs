@@ -68,16 +68,25 @@ public:
 	typedef yaal::hcore::HPointer<HFileSystem> ptr_t;
 	static int const NO_OWNER = -1;
 	class HDescriptor final {
+	public:
+		enum class OPEN_MODE {
+			READING,
+			WRITING,
+			READ_WRITE
+		};
+	private:
 		tools::HXml::HNodeProxy _node;
 		yaal::hcore::HChunk _data;
 		int _size;
+		OPEN_MODE _openMode;
 		yaal::hcore::HChunk _encoded;
 		pid_t _owner;
 	public:
-		HDescriptor( tools::HXml::HNodeProxy const& node_ )
+		HDescriptor( tools::HXml::HNodeProxy const& node_, OPEN_MODE openMode_ )
 			: _node( node_ )
 			, _data()
 			, _size()
+			, _openMode( openMode_ )
 			, _encoded()
 			, _owner( NO_OWNER ) {
 			if ( is_plain( _node ) ) {
@@ -280,12 +289,12 @@ public:
 	handle_t opendir( tools::filesystem::path_t const& path_ ) {
 		M_PROLOG
 		HLock l( _mutex );
-		handle_t h( create_handle() );
 		HXml::HNodeProxy n( get_node_by_path( path_ ) );
 		if ( n.get_name() != FILE::TYPE::DIRECTORY ) {
 			throw HFileSystemException( "Path does not point to a directory: "_ys.append( path_ ), -ENOTDIR );
 		}
-		_descriptors.insert( descriptors_t::value_type( h, HDescriptor( n ) ) );
+		handle_t h( create_handle() );
+		_descriptors.insert( descriptors_t::value_type( h, HDescriptor( n, HDescriptor::OPEN_MODE::READING ) ) );
 		return ( h );
 		M_EPILOG
 	}
@@ -295,6 +304,18 @@ public:
 		_descriptors.erase( descriptor_iterator( handle_ ) );
 		release_handle( handle_ );
 		return;
+		M_EPILOG
+	}
+	handle_t open( tools::filesystem::path_t const& path_, int flags_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		HXml::HNodeProxy n( get_node_by_path( path_ ) );
+		if ( n.get_name() != FILE::TYPE::PLAIN ) {
+			throw HFileSystemException( "Path does not point to a plain file: "_ys.append( path_ ), -EISDIR );
+		}
+		handle_t h( open_handle( n, flags_ ) );
+		_synced = false;
+		return ( h );
 		M_EPILOG
 	}
 	void release( handle_t handle_ ) {
@@ -362,7 +383,7 @@ public:
 		_synced = false;
 		M_EPILOG
 	}
-	handle_t create( tools::filesystem::path_t const& path_, mode_t mode_ ) {
+	handle_t create( tools::filesystem::path_t const& path_, int flags_, mode_t mode_ ) {
 		path_t bname( basename( path_ ) );
 		path_t dname( dirname( path_ ) );
 		HXml::HNodeProxy p( get_node_by_path( dname ) );
@@ -373,8 +394,7 @@ public:
 			throw HFileSystemException( "You have no permission to modify parent directory.", -EACCES );
 		}
 		HXml::HNodeProxy n( create_node( p, FILE::TYPE::PLAIN, bname, mode_ ) );
-		handle_t h( create_handle() );
-		_descriptors.insert( make_pair( h, n ) );
+		handle_t h( open_handle( n, flags_ ) );
 		_synced = false;
 		return ( h );
 	}
@@ -734,6 +754,21 @@ private:
 		return ( n );
 		M_EPILOG
 	}
+	handle_t open_handle( HXml::HNodeProxy& node_, int flags_ ) {
+		M_PROLOG
+		HDescriptor::OPEN_MODE mode( HDescriptor::OPEN_MODE::READING );
+		if ( flags_ & O_RDWR ) {
+			mode = HDescriptor::OPEN_MODE::READ_WRITE;
+		} else if ( flags_ & O_WRONLY ) {
+			mode = HDescriptor::OPEN_MODE::WRITING;
+		} else if ( ! ( flags_ & O_RDONLY ) ) {
+			throw HFileSystemException( "Bad open mode.", -EINVAL );
+		}
+		handle_t h( create_handle() );
+		_descriptors.insert( descriptors_t::value_type( h, HDescriptor( node_, mode ) ) );
+		return ( h );
+		M_EPILOG
+	}
 	static bool is_plain( HXml::HConstNodeProxy const& node_ ) {
 		return ( node_.get_name() == FILE::TYPE::PLAIN );
 	}
@@ -787,9 +822,18 @@ int readlink( char const*, char*, size_t ) {
 	return ( -1 );
 }
 
-int open( char const*, struct fuse_file_info* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int open( char const* path_, struct fuse_file_info* info_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		info_->fh = _fs_->open( path_, info_->flags );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int mknod( char const*, mode_t, dev_t ) {
@@ -1045,7 +1089,7 @@ int create( char const* path_, mode_t mode_, struct fuse_file_info* info_ ) {
 	}
 	int ret( 0 );
 	try {
-		info_->fh = _fs_->create( path_, mode_ );
+		info_->fh = _fs_->create( path_, info_->flags, mode_ );
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
