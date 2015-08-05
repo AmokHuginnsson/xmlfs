@@ -67,12 +67,18 @@ public:
 	typedef HFileSystem this_type;
 	typedef yaal::hcore::HPointer<HFileSystem> ptr_t;
 	static int const NO_OWNER = -1;
+	static int const DIR_SIZE = 160;
 	class HDescriptor final {
 	public:
 		enum class OPEN_MODE {
 			READING,
 			WRITING,
 			READ_WRITE
+		};
+		enum class STATE {
+			META,
+			SYNC,
+			DIRTY
 		};
 	private:
 		tools::HXml::HNodeProxy _node;
@@ -81,18 +87,23 @@ public:
 		OPEN_MODE _openMode;
 		yaal::hcore::HChunk _encoded;
 		pid_t _owner;
+		int _openCount;
+		STATE _state;
 	public:
 		HDescriptor( tools::HXml::HNodeProxy const& node_, OPEN_MODE openMode_ )
 			: _node( node_ )
 			, _data()
-			, _size()
+			, _size( 0 )
 			, _openMode( openMode_ )
 			, _encoded()
-			, _owner( NO_OWNER ) {
+			, _owner( NO_OWNER )
+			, _openCount( 0 )
+			, _state( STATE::META ) {
 			if ( is_plain( _node ) ) {
 				_size = lexical_cast<int>( _node.properties().at( FILE::PROPERTY::SIZE ) );
+				log_trace << "size = " << _size << endl;
 			} else {
-				_size = get_hard_link_count( _node );
+				_size = get_hard_link_count( _node ) * DIR_SIZE;
 			}
 			return;
 		}
@@ -109,19 +120,24 @@ public:
 		}
 		void flush( void ) {
 			M_PROLOG
-			if ( is_plain( _node ) ) {
+			if ( is_plain( _node ) && ( _state == STATE::DIRTY ) ) {
 				int oldSize( lexical_cast<int>( _node.properties().at( FILE::PROPERTY::SIZE ) ) );
 				HXml::HNodeProxy value;
 				if ( oldSize > 0 ) {
+					/* Data existed. */
 					HXml::HIterator valueIt = _node.begin();
 					if ( _size > 0 ) {
+						/* Data will continue to exist. */
 						value = *valueIt;
 					} else {
+						/* Data shall be removed. */
 						_node.remove_node( valueIt );
 					}
 				} else {
+					/* Data did not exist yet. */
 					if ( _size > 0 ) {
-						value = *_node.add_node( HXml::HNode::TYPE::CONTENT );
+						/* Data should be created. */
+						value = *(_node.add_node( HXml::HNode::TYPE::CONTENT ) );
 					}
 				}
 				if ( _size > 0 ) {
@@ -130,14 +146,26 @@ public:
 					HMemory src( srcMem );
 					HMemory dst( dstMem );
 					base64::encode( src, dst );
-					value.set_value( _encoded.get<char>() );
+					HString data( static_cast<char*>( dstMem.get_memory() ), dstMem.get_size() );
+					value.set_value( data );
 				}
 				_node.properties()[ FILE::PROPERTY::SIZE ] = _size;
+				_state = STATE::SYNC;
 			}
 			return;
 			M_EPILOG
 		}
+		void inc_open_count( void ) {
+			++ _openCount;
+		}
+		void dec_open_count( void ) {
+			-- _openCount;
+		}
+		bool is_opened( void ) const {
+			return ( _openCount > 0 );
+		}
 		void lock( int cmd_, struct flock* lock_ ) {
+			M_PROLOG
 			if ( _owner > NO_OWNER ) {
 				if ( cmd_ == F_GETLK ) {
 					lock_->l_pid = _owner;
@@ -168,8 +196,111 @@ public:
 					}
 				}
 			}
+			return;
+			M_EPILOG
+		}
+		void truncate( int size_ ) {
+			M_PROLOG
+			if ( size_ < 0 ) {
+				throw HFileSystemException( "Bad size.", -EINVAL );
+			}
+			if ( ! is_plain( _node ) ) {
+				throw HFileSystemException( "File is not a plain file.", -EISDIR );
+			}
+			if ( _state == STATE::META ) {
+				int metaSize( lexical_cast<int>( _node.properties().at( FILE::PROPERTY::SIZE ) ) );
+				if ( metaSize != size_ ) {
+					decode();
+				}
+			}
+			if ( size_ != _size ) {
+				_state = STATE::DIRTY;
+				if ( size_ > 0 ) {
+					_data.realloc( size_ );
+				}
+				_size = size_;
+			}
+			return;
+			M_EPILOG
+		}
+		int write_buf( fuse_bufvec const* buf_, int offset_ ) {
+			M_PROLOG
+			if ( offset_ < 0 ) {
+				throw HFileSystemException( "Bad offset.", -EINVAL );
+			}
+			if ( ! is_plain( _node ) ) {
+				throw HFileSystemException( "File is not a plain file.", -EISDIR );
+			}
+			int totalSize( static_cast<int>( fuse_buf_size( buf_ ) ) );
+			if ( _state == STATE::META ) {
+				if ( _size > 0 ) {
+					decode();
+				}
+			}
+			int newSize( max( _size, offset_ + totalSize ) );
+			_data.realloc( newSize );
+			fuse_bufvec dst;
+			::memset( &dst, 0, sizeof ( dst ) );
+			dst.buf[0].mem = _data.get<char>() + offset_;
+			dst.buf[0].size = static_cast<size_t>( totalSize );
+			dst.count = 1;
+			int written( static_cast<int>( fuse_buf_copy( &dst, const_cast<fuse_bufvec*>( buf_ ), FUSE_BUF_NO_SPLICE ) ) );
+			_size = newSize;
+			_state = STATE::DIRTY;
+			return ( written );
+			M_EPILOG
+		}
+		int read_buf( fuse_bufvec** dst_, int size_, int offset_ ) {
+			M_PROLOG
+			if ( offset_ < 0 ) {
+				throw HFileSystemException( "Bad offset.", -EINVAL );
+			}
+			if ( size_ < 0 ) {
+				throw HFileSystemException( "Bad size.", -EINVAL );
+			}
+			if ( ! is_plain( _node ) ) {
+				throw HFileSystemException( "File is not a plain file.", -EISDIR );
+			}
+			if ( _state == STATE::META ) {
+				if ( _size > 0 ) {
+					decode();
+				}
+			}
+			int toRead( min( max( _size - offset_, 0 ), size_ ) );
+			*dst_ = memory::calloc<fuse_bufvec>( 1 );
+			if ( toRead > 0 ) {
+				(*dst_)->buf[0].mem = memory::alloc( toRead );
+				(*dst_)->buf[0].size = static_cast<size_t>( toRead );
+				(*dst_)->count = 1;
+				::memcpy( (*dst_)->buf[0].mem, _data.get<char const*>() + offset_, static_cast<size_t>( toRead ) );
+			}
+			return ( toRead );
+			M_EPILOG
 		}
 	private:
+		void decode( void ) {
+			M_PROLOG
+			M_ASSERT( _state == STATE::META );
+			if ( _size > 0 ) {
+				M_ASSERT( _node.child_count() == 1 );
+				HXml::HNodeProxy value( *(_node.begin()) );
+				HString const& data( value.get_value() );
+				HMemoryObserver srcMem( const_cast<char*>( data.raw() ), data.get_size() );
+				HMemoryProvider dstMem( _data, 0 );
+				HMemory src( srcMem );
+				HMemory dst( dstMem );
+				base64::decode( src, dst );
+				int decodedSize( static_cast<int>( dstMem.get_size() ) );
+				if ( decodedSize == _size ) {
+					_state = STATE::SYNC;
+				} else {
+					_size = decodedSize;
+					_state = STATE::DIRTY;
+				}
+			}
+			return;
+			M_EPILOG
+		}
 		HDescriptor( HDescriptor const& ) = delete;
 		HDescriptor& operator = ( HDescriptor const& ) = delete;
 	};
@@ -178,8 +309,10 @@ private:
 	yaal::tools::HXml _image;
 	dev_t _devId;
 	typedef yaal::u64_t handle_t;
-	typedef yaal::hcore::HHashMap<handle_t, HDescriptor> descriptors_t;
+	typedef yaal::hcore::HHashMap<handle_t, u64_t> inodes_t;
+	typedef yaal::hcore::HHashMap<u64_t, HDescriptor> descriptors_t;
 	typedef yaal::hcore::HStack<handle_t> available_descriptors_t;
+	inodes_t _inodes;
 	descriptors_t _descriptors;
 	bool _synced;
 	typedef std::atomic<u64_t> inode_generator_t;
@@ -229,6 +362,7 @@ public:
 		: _imagePath( imagePath_ )
 		, _image()
 		, _devId( 0 )
+		, _inodes()
 		, _descriptors()
 		, _synced( false )
 		, _inodeGenerator( 0 )
@@ -268,8 +402,10 @@ public:
 	}
 	~HFileSystem( void ) {
 		M_PROLOG
-		if ( ! _descriptors.is_empty() ) {
-			log( LOG_LEVEL::ERROR ) << "descriptor leak!" << endl;
+		if ( ! ( _inodes.is_empty() && _descriptors.is_empty() ) ) {
+			log( LOG_LEVEL::ERROR )
+				<< "descriptor leak! (inodes=" << _inodes.get_size()
+				<< ",descriptors=" << _descriptors.get_size() << ")" << endl;
 		}
 		return;
 		M_DESTRUCTOR_EPILOG
@@ -294,15 +430,16 @@ public:
 			throw HFileSystemException( "Path does not point to a directory: "_ys.append( path_ ), -ENOTDIR );
 		}
 		handle_t h( create_handle() );
-		_descriptors.insert( descriptors_t::value_type( h, HDescriptor( n, HDescriptor::OPEN_MODE::READING ) ) );
+		u64_t inode( get_inode( n ) );
+		_inodes.insert( make_pair( h, inode ) );
+		descriptors_t::iterator descIt( _descriptors.insert( descriptors_t::value_type( inode, HDescriptor( n, HDescriptor::OPEN_MODE::READING ) ) ).first );
+		descIt->second.inc_open_count();
 		return ( h );
 		M_EPILOG
 	}
 	void releasedir( handle_t handle_ ) {
 		M_PROLOG
-		HLock l( _mutex );
-		_descriptors.erase( descriptor_iterator( handle_ ) );
-		release_handle( handle_ );
+		release( handle_ );
 		return;
 		M_EPILOG
 	}
@@ -321,7 +458,17 @@ public:
 	void release( handle_t handle_ ) {
 		M_PROLOG
 		HLock l( _mutex );
-		_descriptors.erase( descriptor_iterator( handle_ ) );
+		inodes_t::iterator inodeIt( _inodes.find( handle_ ) );
+		if ( ! ( inodeIt != _inodes.end() ) ) {
+			throw HFileSystemException( "Invalid handle: "_ys.append( handle_ ), -EBADF );
+		}
+		descriptors_t::iterator descIt( _descriptors.find( inodeIt->second ) );
+		M_ASSERT( descIt != _descriptors.end() );
+		descIt->second.dec_open_count();
+		if ( ! descIt->second.is_opened() ) {
+			_descriptors.erase( descIt );
+		}
+		_inodes.erase( inodeIt );
 		release_handle( handle_ );
 		return;
 		M_EPILOG
@@ -408,7 +555,7 @@ public:
 		}
 		bool ok( false );
 		for ( HXml::HConstNodeProxy c : n ) {
-			if ( c.get_name() == FILE::CONTENT::XATTR ) {
+			if ( ( c.get_type() == HXml::HNode::TYPE::NODE ) && ( c.get_name() == FILE::CONTENT::XATTR ) ) {
 				n = c;
 				ok = true;
 				break;
@@ -418,7 +565,7 @@ public:
 			ok = false;
 			HString ns( name_.left( pos ) );
 			for ( HXml::HConstNodeProxy c : n ) {
-				if ( c.get_name() == ns ) {
+				if ( ( c.get_type() == HXml::HNode::TYPE::NODE ) && ( c.get_name() == ns ) ) {
 					ok = true;
 					n = c;
 					break;
@@ -429,7 +576,7 @@ public:
 			ok = false;
 			HString name( name_.mid( pos + 1 ) );
 			for ( HXml::HConstNodeProxy c : n ) {
-				if ( c.get_name() == name ) {
+				if ( ( c.get_type() == HXml::HNode::TYPE::NODE ) && ( c.get_name() == name ) ) {
 					ok = true;
 					n = c;
 					break;
@@ -539,6 +686,46 @@ public:
 		return;
 		M_EPILOG
 	}
+	void truncate( char const* path_, int size_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		HXml::HNodeProxy n( get_node_by_path( path_ ) );
+		u64_t inode( get_inode( n ) );
+		descriptors_t::iterator it( _descriptors.find( inode ) );
+		if ( it != _descriptors.end() ) {
+			it->second.truncate( size_ );
+		} else {
+			HDescriptor d( n, HDescriptor::OPEN_MODE::WRITING );
+			d.truncate( size_ );
+			d.flush();
+		}
+		_synced = false;
+		return;
+		M_EPILOG
+	}
+	void ftruncate( handle_t handle_, int size_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		descriptor( handle_ ).truncate( size_ );
+		_synced = false;
+		return;
+		M_EPILOG
+	}
+	int write_buf( handle_t handle_, fuse_bufvec const* buf_, int offset_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		int ret( descriptor( handle_ ).write_buf( buf_, offset_ ) );
+		_synced = false;
+		return ( ret );
+		M_EPILOG
+	}
+	int read_buf( handle_t handle_, fuse_bufvec** buf_, int size_, int offset_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		int ret( descriptor( handle_ ).read_buf( buf_, size_, offset_ ) );
+		return ( ret );
+		M_EPILOG
+	}
 private:
 	HFileSystem( HFileSystem const& ) = delete;
 	HFileSystem& operator = ( HFileSystem const& ) = delete;
@@ -558,31 +745,26 @@ private:
 		return;
 		M_EPILOG
 	}
-	descriptors_t::iterator descriptor_iterator( handle_t handle_ ) {
-		M_PROLOG
-		descriptors_t::iterator it( _descriptors.find( handle_ ) );
-		if ( ! ( it != _descriptors.end() ) ) {
-			throw HFileSystemException( "Invalid handle: "_ys.append( handle_ ), -EBADF );
-		}
-		return ( it );
-		M_EPILOG
-	}
 	HDescriptor& descriptor( handle_t handle_ ) {
 		M_PROLOG
-		descriptors_t::iterator it( _descriptors.find( handle_ ) );
-		if ( ! ( it != _descriptors.end() ) ) {
+		inodes_t::iterator inodeIt( _inodes.find( handle_ ) );
+		if ( ! ( inodeIt != _inodes.end() ) ) {
 			throw HFileSystemException( "Invalid handle: "_ys.append( handle_ ), -EBADF );
 		}
-		return ( it->second );
+		descriptors_t::iterator descIt( _descriptors.find( inodeIt->second ) );
+		M_ASSERT( descIt != _descriptors.end() );
+		return ( descIt->second );
 		M_EPILOG
 	}
 	HDescriptor const& descriptor( handle_t handle_ ) const {
 		M_PROLOG
-		descriptors_t::const_iterator it( _descriptors.find( handle_ ) );
-		if ( ! ( it != _descriptors.end() ) ) {
+		inodes_t::const_iterator inodeIt( _inodes.find( handle_ ) );
+		if ( ! ( inodeIt != _inodes.end() ) ) {
 			throw HFileSystemException( "Invalid handle: "_ys.append( handle_ ), -EBADF );
 		}
-		return ( it->second );
+		descriptors_t::const_iterator descIt( _descriptors.find( inodeIt->second ) );
+		M_ASSERT( descIt != _descriptors.end() );
+		return ( descIt->second );
 		M_EPILOG
 	}
 	bool have_access( HXml::HConstNodeProxy const& fsElem_, int mode_ ) const {
@@ -665,6 +847,11 @@ private:
 		}
 		return ( hlc );
 	}
+	u64_t get_inode( HXml::HConstNodeProxy const& n_ ) const {
+		M_PROLOG
+		return ( lexical_cast<uid_t>( n_.properties().at( FILE::PROPERTY::INODE ) ) );
+		M_EPILOG
+	}
 	uid_t get_user( HXml::HConstNodeProxy const& n_ ) const {
 		M_PROLOG
 		return ( lexical_cast<uid_t>( n_.properties().at( FILE::PROPERTY::USER ) ) );
@@ -693,7 +880,7 @@ private:
 		} else if ( type == FILE::TYPE::DIRECTORY ) {
 			stat_->st_mode = S_IFDIR;
 			stat_->st_nlink = static_cast<nlink_t>( get_hard_link_count( n_ ) );
-			stat_->st_size = static_cast<off_t>( ( stat_->st_nlink ) * 160 );
+			stat_->st_size = static_cast<off_t>( ( stat_->st_nlink ) * DIR_SIZE );
 		} else if ( type == FILE::TYPE::SYMLINK ) {
 			stat_->st_mode = S_IFLNK;
 			stat_->st_size = p.at( FILE::PROPERTY::SYMLINK ).get_length();
@@ -761,11 +948,12 @@ private:
 			mode = HDescriptor::OPEN_MODE::READ_WRITE;
 		} else if ( flags_ & O_WRONLY ) {
 			mode = HDescriptor::OPEN_MODE::WRITING;
-		} else if ( ! ( flags_ & O_RDONLY ) ) {
-			throw HFileSystemException( "Bad open mode.", -EINVAL );
 		}
 		handle_t h( create_handle() );
-		_descriptors.insert( descriptors_t::value_type( h, HDescriptor( node_, mode ) ) );
+		u64_t inode( get_inode( node_ ) );
+		_inodes.insert( make_pair( h, inode ) );
+		descriptors_t::iterator descIt( _descriptors.insert( descriptors_t::value_type( inode, HDescriptor( node_, mode ) ) ).first );
+		descIt->second.inc_open_count();
 		return ( h );
 		M_EPILOG
 	}
@@ -824,7 +1012,7 @@ int readlink( char const*, char*, size_t ) {
 
 int open( char const* path_, struct fuse_file_info* info_ ) {
 	if ( setup._debug ) {
-		log_trace << path_ << endl;
+		log_trace << path_ << ", flags: " << info_->flags << endl;
 	}
 	int ret( 0 );
 	try {
@@ -899,9 +1087,18 @@ int chown( char const*, uid_t, gid_t ) {
 	return ( -1 );
 }
 
-int truncate( char const*, off_t ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int truncate( char const* path_, off_t size_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << ", " << size_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->truncate( path_, static_cast<int>( size_ ) );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int read( char  const*, char*, size_t, off_t,
@@ -1097,9 +1294,18 @@ int create( char const* path_, mode_t mode_, struct fuse_file_info* info_ ) {
 	return ( ret );
 }
 
-int ftruncate( char const*, off_t, struct fuse_file_info* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int ftruncate( char const* path_, off_t size_, struct fuse_file_info* info_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << ", " << size_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->ftruncate( info_->fh, static_cast<int>( size_ ) );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int fgetattr( char const* path_, struct stat* stat_, struct fuse_file_info* info_ ) {
@@ -1159,14 +1365,39 @@ int poll( char const*, struct fuse_file_info*, struct fuse_pollhandle*, int unsi
 	return ( -1 );
 }
 
-int write_buf( char const*, struct fuse_bufvec*, off_t, struct fuse_file_info* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int write_buf( char const* path_, struct fuse_bufvec* src_, off_t offset_, struct fuse_file_info* info_ ) {
+	if ( setup._debug ) {
+		int toWrite( static_cast<int>( fuse_buf_size( src_ ) ) );
+		log_trace << path_ << ", to write: " << toWrite << endl;
+	}
+	int ret( 0 );
+	try {
+		ret = _fs_->write_buf( info_->fh, src_, static_cast<int>( offset_ ) );
+		if ( setup._debug ) {
+			log_trace << path_ << ", written: " << ret << endl;
+		}
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
+	}
+	return ( ret );
 }
 
-int read_buf( char const*, struct fuse_bufvec**, size_t, off_t, struct fuse_file_info* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int read_buf( char const* path_, struct fuse_bufvec** dst_, size_t size_, off_t offset_, struct fuse_file_info* info_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << ", to read: " << size_ << ", at offset: " << offset_ << endl;
+	}
+	int ret( 0 );
+	try {
+		ret = _fs_->read_buf( info_->fh, dst_, static_cast<int>( size_ ), static_cast<int>( offset_ ) );
+		if ( setup._debug ) {
+			log_trace << path_ << ", read: " << ret << endl;
+		}
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
+	}
+	return ( ret );
 }
 
 int flock( char const*, struct fuse_file_info*, int ) {
@@ -1185,50 +1416,50 @@ struct fuse_operations xmlfsFuse;
 
 int main( int argc_, char** argv_ ) {
 	::memset( &xmlfsFuse, 0, sizeof ( xmlfsFuse ) );
-	xmlfsFuse.getattr     = &getattr;
-	xmlfsFuse.readlink    = &readlink;
-	xmlfsFuse.getdir      = nullptr;
-	xmlfsFuse.mknod       = &mknod;
-	xmlfsFuse.mkdir       = &mkdir;
-	xmlfsFuse.unlink      = &unlink;
-	xmlfsFuse.rmdir       = &rmdir;
-	xmlfsFuse.symlink     = &symlink;
-	xmlfsFuse.rename      = &rename;
-	xmlfsFuse.link        = &link;
+	xmlfsFuse.access      = &access;
+	xmlfsFuse.bmap        = &bmap;
 	xmlfsFuse.chmod       = &chmod;
 	xmlfsFuse.chown       = &chown;
-	xmlfsFuse.truncate    = &truncate;
-	xmlfsFuse.utime       = nullptr;
-	xmlfsFuse.open        = &open;
-	xmlfsFuse.read        = &read;
-	xmlfsFuse.write       = &write;
-	xmlfsFuse.statfs      = &statfs;
-	xmlfsFuse.flush       = &flush;
-	xmlfsFuse.release     = &release;
-	xmlfsFuse.fsync       = &fsync;
-	xmlfsFuse.setxattr    = &setxattr;
-	xmlfsFuse.getxattr    = &getxattr;
-	xmlfsFuse.listxattr   = &listxattr;
-	xmlfsFuse.removexattr = &removexattr;
-	xmlfsFuse.opendir     = &opendir;
-	xmlfsFuse.readdir     = &readdir;
-	xmlfsFuse.releasedir  = &releasedir;
-	xmlfsFuse.fsyncdir    = &fsyncdir;
-	xmlfsFuse.init        = &init;
-	xmlfsFuse.destroy     = &destroy;
-	xmlfsFuse.access      = &access;
 	xmlfsFuse.create      = &create;
-	xmlfsFuse.ftruncate   = &ftruncate;
-	xmlfsFuse.fgetattr    = &fgetattr;
-	xmlfsFuse.lock        = &lock;
-	xmlfsFuse.utimens     = &utimens;
-	xmlfsFuse.bmap        = &bmap;
-	xmlfsFuse.ioctl       = &ioctl;
-	xmlfsFuse.poll        = &poll;
-	xmlfsFuse.write_buf   = &write_buf;
-	xmlfsFuse.read_buf    = &read_buf;
-	xmlfsFuse.flock       = &flock;
+	xmlfsFuse.destroy     = &destroy;
 	xmlfsFuse.fallocate   = &fallocate;
+	xmlfsFuse.fgetattr    = &fgetattr;
+	xmlfsFuse.flock       = &flock;
+	xmlfsFuse.flush       = &flush;
+	xmlfsFuse.fsync       = &fsync;
+	xmlfsFuse.fsyncdir    = &fsyncdir;
+	xmlfsFuse.ftruncate   = &ftruncate;
+	xmlfsFuse.getattr     = &getattr;
+	xmlfsFuse.getdir      = nullptr;
+	xmlfsFuse.getxattr    = &getxattr;
+	xmlfsFuse.init        = &init;
+	xmlfsFuse.ioctl       = &ioctl;
+	xmlfsFuse.link        = &link;
+	xmlfsFuse.listxattr   = &listxattr;
+	xmlfsFuse.lock        = &lock;
+	xmlfsFuse.mkdir       = &mkdir;
+	xmlfsFuse.mknod       = &mknod;
+	xmlfsFuse.open        = &open;
+	xmlfsFuse.opendir     = &opendir;
+	xmlfsFuse.poll        = &poll;
+	xmlfsFuse.read        = &read;
+	xmlfsFuse.read_buf    = &read_buf;
+	xmlfsFuse.readdir     = &readdir;
+	xmlfsFuse.readlink    = &readlink;
+	xmlfsFuse.release     = &release;
+	xmlfsFuse.releasedir  = &releasedir;
+	xmlfsFuse.removexattr = &removexattr;
+	xmlfsFuse.rename      = &rename;
+	xmlfsFuse.rmdir       = &rmdir;
+	xmlfsFuse.setxattr    = &setxattr;
+	xmlfsFuse.statfs      = &statfs;
+	xmlfsFuse.symlink     = &symlink;
+	xmlfsFuse.truncate    = &truncate;
+	xmlfsFuse.unlink      = &unlink;
+	xmlfsFuse.utime       = nullptr;
+	xmlfsFuse.utimens     = &utimens;
+	xmlfsFuse.write       = &write;
+	xmlfsFuse.write_buf   = &write_buf;
 	return ( fuse_main( argc_, argv_, &xmlfsFuse, nullptr ) );
 }
 
