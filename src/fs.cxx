@@ -751,6 +751,81 @@ public:
 		return;
 		M_EPILOG
 	}
+	void rename( filesystem::path_t const& from_, filesystem::path_t const& to_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		path_t fromDName( dirname( from_ ) );
+		path_t toDName( dirname( to_ ) );
+		path_t toBName( basename( to_ ) );
+		HXml::HIterator fromIt( get_node_it_by_path( from_ ) );
+		HXml::HNodeProxy fromDir( (*fromIt).get_parent() );
+		HXml::HNodeProxy toDir( get_node_by_path( toDName ) );
+		HXml::HIterator toIt( toDir.end() );
+		try {
+			toIt = get_node_it_by_path( to_ );
+		} catch ( ... ) {
+		}
+		if ( ! have_access( fromDir, W_OK | X_OK ) ) {
+			throw HFileSystemException( "You have no permission to modify parent directory.", -EACCES );
+		}
+		if ( ! is_directory( fromDir ) ) {
+			throw HFileSystemException( "Path does not point to a directory: "_ys.append( fromDName ), -ENOTDIR );
+		}
+		bool srcDir( is_directory( *fromIt ) );
+		if ( toIt != toDir.end() ) {
+			/* Destination already exists. */
+			if ( srcDir ) {
+				/* Source is a directory. */
+				if ( ! is_directory( *toIt ) ) {
+					throw HFileSystemException( "Path does not point to a directory: "_ys.append( to_ ), -ENOTDIR );
+				}
+				if ( ! (*toIt).disjointed( *fromIt ) ) {
+					throw HFileSystemException( "The new pathname contained a path prefix of the old.", -EINVAL );
+				}
+				if ( ! have_access( *toIt, W_OK | X_OK ) ) {
+					throw HFileSystemException( "You have no permission to modify destination directory.", -EACCES );
+				}
+				(*toIt).move_node( *fromIt );
+			} else {
+				/* Source is a regular file. */
+				if ( is_directory( *toIt ) ) {
+					if ( ! (*toIt).disjointed( *fromIt ) ) {
+						throw HFileSystemException( "The new pathname contained a path prefix of the old.", -EINVAL );
+					}
+					if ( ! have_access( *toIt, W_OK | X_OK ) ) {
+						throw HFileSystemException( "You have no permission to modify destination directory.", -EACCES );
+					}
+					(*toIt).move_node( *fromIt );
+				} else {
+					/* Both source and destination exist and both are regular files. */
+					if ( ! (*toIt).disjointed( *fromIt ) ) {
+						throw HFileSystemException( "The new pathname contained a path prefix of the old.", -EINVAL );
+					}
+					if ( ! have_access( toDir, W_OK | X_OK ) ) {
+						throw HFileSystemException( "You have no permission to modify destination directory.", -EACCES );
+					}
+					toDir.replace_node( toIt, *fromIt );
+				}
+			}
+		} else {
+			/* Destination does not exist. */
+			if ( ! is_directory( toDir ) ) {
+				throw HFileSystemException( "Path does not point to a directory: "_ys.append( toDName ), -ENOTDIR );
+			}
+			if ( ! toDir.disjointed( *fromIt ) ) {
+				throw HFileSystemException( "The new pathname contained a path prefix of the old.", -EINVAL );
+			}
+			if ( ! have_access( toDir, W_OK | X_OK ) ) {
+				throw HFileSystemException( "You have no permission to modify destination directory.", -EACCES );
+			}
+			HXml::HNodeProxy node( *fromIt );
+			toDir.move_node( *fromIt );
+			node.properties()[FILE::PROPERTY::NAME] = toBName;
+		}
+		_synced = false;
+		return;
+		M_EPILOG
+	}
 private:
 	HFileSystem( HFileSystem const& ) = delete;
 	HFileSystem& operator = ( HFileSystem const& ) = delete;
@@ -866,7 +941,7 @@ private:
 	static int get_hard_link_count( HXml::HConstNodeProxy const& n_ ) {
 		int hlc( 2 );
 		for ( HXml::HConstNodeProxy const& c : n_ ) {
-			if ( c.get_name() == FILE::TYPE::DIRECTORY ) {
+			if ( is_directory( c ) ) {
 				++ hlc;
 			}
 		}
@@ -989,7 +1064,7 @@ private:
 		return ( node_.get_name() == FILE::TYPE::PLAIN );
 	}
 	static bool is_directory( HXml::HConstNodeProxy const& node_ ) {
-		return ( node_.get_name() == FILE::TYPE::PLAIN );
+		return ( node_.get_name() == FILE::TYPE::DIRECTORY );
 	}
 };
 yaal::hcore::HString const HFileSystem::ROOT_NODE( "root" );
@@ -1104,9 +1179,18 @@ int symlink( char const*, char const* ) {
 	return ( -1 );
 }
 
-int rename( char const*, char const* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int rename( char const* from_, char const* to_ ) {
+	if ( setup._debug ) {
+		log_trace << from_ << "->" << to_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->rename( from_, to_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int link( char const*, char const* ) {
