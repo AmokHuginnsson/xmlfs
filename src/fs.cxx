@@ -33,6 +33,7 @@ Copyright:
 #define FUSE_USE_VERSION 29
 #include <fuse.h>
 #include <sys/xattr.h>
+#include <attr/xattr.h>
 
 #include <yaal/config.hxx>
 #include <yaal/hcore/hstack.hxx>
@@ -124,7 +125,7 @@ public:
 				HXml::HNodeProxy value;
 				if ( oldSize > 0 ) {
 					/* Data existed. */
-					HXml::HIterator valueIt = _node.begin();
+					HXml::HIterator valueIt = content();
 					if ( _size > 0 ) {
 						/* Data will continue to exist. */
 						value = *valueIt;
@@ -282,7 +283,7 @@ public:
 			M_ASSERT( _state == STATE::META );
 			if ( _size > 0 ) {
 				M_ASSERT( _node.child_count() == 1 );
-				HXml::HNodeProxy value( *(_node.begin()) );
+				HXml::HNodeProxy value( *content() );
 				HString const& data( value.get_value() );
 				HMemoryObserver srcMem( const_cast<char*>( data.raw() ), data.get_size() );
 				HMemoryProvider dstMem( _data, 0 );
@@ -298,6 +299,18 @@ public:
 				}
 			}
 			return;
+			M_EPILOG
+		}
+		HXml::HIterator content( void ) {
+			M_PROLOG
+			HXml::HIterator it( _node.begin() );
+			while ( it != _node.end() ) {
+				if ( (*it).get_type() == HXml::HNode::TYPE::CONTENT ) {
+					break;
+				}
+				++ it;
+			}
+			return ( it );
 			M_EPILOG
 		}
 		HDescriptor( HDescriptor const& ) = delete;
@@ -564,7 +577,7 @@ public:
 			ok = false;
 			HString ns( name_.left( pos ) );
 			for ( HXml::HConstNodeProxy c : n ) {
-				if ( ( c.get_type() == HXml::HNode::TYPE::NODE ) && ( c.get_name() == ns ) ) {
+				if ( c.get_name() == ns ) {
 					ok = true;
 					n = c;
 					break;
@@ -575,7 +588,7 @@ public:
 			ok = false;
 			HString name( name_.mid( pos + 1 ) );
 			for ( HXml::HConstNodeProxy c : n ) {
-				if ( ( c.get_type() == HXml::HNode::TYPE::NODE ) && ( c.get_name() == name ) ) {
+				if ( c.get_name() == name ) {
 					ok = true;
 					n = c;
 					break;
@@ -584,16 +597,78 @@ public:
 		}
 		int ret( 0 );
 		if ( ok ) {
-			ret = static_cast<int>( n.get_value().get_size() );
+			HString value( base64::decode( (*n.begin()).get_value() ) );
+			ret = static_cast<int>( value.get_size() );
 			if ( ret <= static_cast<int>( size_ ) ) {
-				::memcpy( buffer_, n.get_value().c_str(), static_cast<int unsigned>( ret ) );
+				::memcpy( buffer_, value.c_str(), static_cast<int unsigned>( ret ) );
 			} else if ( static_cast<int>( size_ ) > 0 ) {
-				ret = -ERANGE;
+				throw HFileSystemException( "Buffer for extended attributes is too small.", -ERANGE );
 			}
 		} else {
 			ret = -ENODATA;
 		}
 		return ( ret );
+		M_EPILOG
+	}
+	void setxattr( char const* path_, HString const& name_, char const* buffer_, int size_, int flags_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		HXml::HNodeProxy n( get_node_by_path( path_ ) );
+		int pos( static_cast<int>( name_.find( '.' ) ) );
+		if ( pos == HString::npos ) {
+			throw HFileSystemException( "Invalid attribute name: "_ys.append( name_ ), -EINVAL );
+		}
+		bool ok( false );
+		for ( HXml::HNodeProxy c : n ) {
+			if ( ( c.get_type() == HXml::HNode::TYPE::NODE ) && ( c.get_name() == FILE::CONTENT::XATTR ) ) {
+				n = c;
+				ok = true;
+				break;
+			}
+		}
+		if ( ! ok ) {
+			/* Extended attributes did not exist yet. */
+			n = *n.add_node( FILE::CONTENT::XATTR );
+		}
+		ok = false;
+		HString ns( name_.left( pos ) );
+		for ( HXml::HNodeProxy c : n ) {
+			if ( c.get_name() == ns ) {
+				ok = true;
+				n = c;
+				break;
+			}
+		}
+		if ( ! ok ) {
+			/* Given namespace does not exist yet. */
+			n = *n.add_node( ns );
+		}
+		ok = false;
+		HString name( name_.mid( pos + 1 ) );
+		for ( HXml::HNodeProxy c : n ) {
+			if ( c.get_name() == name ) {
+				ok = true;
+				n = c;
+				break;
+			}
+		}
+		if ( ok && ( flags_ == XATTR_CREATE ) ) {
+			throw HFileSystemException( "ExAttr already exists: "_ys.append( name ), -EEXIST );
+		} else if ( ! ok && ( flags_ == XATTR_REPLACE ) ) {
+			throw HFileSystemException( "ExAttr does not exist: "_ys.append( name ), -ENOATTR );
+		}
+		if ( ! ok ) {
+			n = *n.add_node( name );
+			n = *n.add_node( HXml::HNode::TYPE::CONTENT );
+		} else if ( n.has_childs() ) {
+			n = *n.begin();
+		} else {
+			n = *n.add_node( HXml::HNode::TYPE::CONTENT );
+		}
+		HString value( buffer_, size_ );
+		n.set_value( base64::encode( value ) );
+		_synced = false;
+		return;
 		M_EPILOG
 	}
 	int listxattr( char const* path_, char* buffer_, size_t size_ ) const {
@@ -602,7 +677,7 @@ public:
 		HXml::HConstNodeProxy n( get_node_by_path( path_ ) );
 		bool ok( false );
 		for ( HXml::HConstNodeProxy c : n ) {
-			if ( c.get_name() == FILE::CONTENT::XATTR ) {
+			if ( ( c.get_type() == HXml::HNode::TYPE::NODE ) && ( c.get_name() == FILE::CONTENT::XATTR ) ) {
 				n = c;
 				ok = true;
 				break;
@@ -624,8 +699,8 @@ public:
 				int offset( 0 );
 				for ( HString const* s : names ) {
 					::memcpy( buffer_ + offset, s->c_str(), static_cast<int unsigned>( s->get_size() ) );
-					buffer_[offset] = 0;
 					offset += static_cast<int>( s->get_size() );
+					buffer_[offset] = 0;
 					++ offset;
 				}
 			} else if ( size_ > 0 ) {
@@ -1251,7 +1326,7 @@ int write( char const*, char const*, size_t, off_t, struct fuse_file_info* ) {
 	return ( -1 );
 }
 
-int statfs( char  const*, struct statvfs * ) {
+int statfs( char const*, struct statvfs * ) {
 	log << __PRETTY_FUNCTION__ << endl;
 	return ( -1 );
 }
@@ -1289,14 +1364,23 @@ int fsync( char const*, int, struct fuse_file_info* ) {
 	return ( -1 );
 }
 
-int setxattr( char const*, char const*, char const*, size_t, int ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int setxattr( char const* path_, char const* name_, char const* value_, size_t size_, int flags_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->setxattr( path_, name_, value_, static_cast<int>( size_ ), flags_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int getxattr( char const* path_, char const* name_, char* buffer_, size_t size_ ) {
 	if ( setup._debug ) {
-		log_trace << path_ << endl;
+		log_trace << path_ << ", for name: " << name_ <<  endl;
 	}
 	int ret( 0 );
 	try {
@@ -1310,7 +1394,7 @@ int getxattr( char const* path_, char const* name_, char* buffer_, size_t size_ 
 
 int listxattr( char const* path_, char* buffer_, size_t size_ ) {
 	if ( setup._debug ) {
-		log_trace << endl;
+		log_trace << path_ << endl;
 	}
 	int ret( 0 );
 	try {
