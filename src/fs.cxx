@@ -101,7 +101,6 @@ public:
 			, _state( STATE::META ) {
 			if ( is_plain( _node ) ) {
 				_size = lexical_cast<int>( _node.properties().at( FILE::PROPERTY::SIZE ) );
-				log_trace << "size = " << _size << endl;
 			} else {
 				_size = get_hard_link_count( _node ) * DIR_SIZE;
 			}
@@ -672,6 +671,12 @@ public:
 		return;
 		M_EPILOG
 	}
+	void rmdir( char const* path_ ) {
+		M_PROLOG
+		unlink( path_ );
+		return;
+		M_EPILOG
+	}
 	void flush( handle_t handle_ ) {
 		M_PROLOG
 		HLock l( _mutex );
@@ -724,6 +729,26 @@ public:
 		HLock l( _mutex );
 		int ret( descriptor( handle_ ).read_buf( buf_, size_, offset_ ) );
 		return ( ret );
+		M_EPILOG
+	}
+	void chmod( char const* path_, mode_t mode_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		HXml::HNodeProxy n( get_node_by_path( path_ ) );
+		set_mode( n, mode_ );
+		_synced = false;
+		return;
+		M_EPILOG
+	}
+	void chown( char const* path_, uid_t uid_, gid_t gid_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		HXml::HNodeProxy n( get_node_by_path( path_ ) );
+		HXml::HNode::properties_t& a( n.properties() );
+		a[ FILE::PROPERTY::USER ] = to_string( uid_ );
+		a[ FILE::PROPERTY::GROUP ] = to_string( gid_ );
+		_synced = false;
+		return;
 		M_EPILOG
 	}
 private:
@@ -927,9 +952,6 @@ private:
 		HXml::HNodeProxy n( *parent_.add_node( type_ ) );
 		HXml::HNode::properties_t& a( n.properties() );
 		a.insert( make_pair( FILE::PROPERTY::NAME, name_ ) );
-		HString mode;
-		mode.format( "%04o", ( mode_ & 0777 ) );
-		a.insert( make_pair( FILE::PROPERTY::MODE, mode ) );
 		a.insert( make_pair( FILE::PROPERTY::SIZE, HString( "0" ) ) );
 		HString now( now_local().to_string() );
 		a.insert( make_pair( FILE::PROPERTY::TIME::CHANGE, now ) );
@@ -938,7 +960,13 @@ private:
 		a.insert( make_pair( FILE::PROPERTY::USER, to_string( getuid() ) ) );
 		a.insert( make_pair( FILE::PROPERTY::GROUP, to_string( getgid() ) ) );
 		a.insert( make_pair( FILE::PROPERTY::INODE, to_string( _inodeGenerator ++ ) ) );
+		set_mode( n, mode_ );
 		return ( n );
+		M_EPILOG
+	}
+	void set_mode( HXml::HNodeProxy& node_, mode_t mode_ ) {
+		M_PROLOG
+		node_.properties()[ FILE::PROPERTY::MODE ].format( "%04o", mode_ & 07777 );
 		M_EPILOG
 	}
 	handle_t open_handle( HXml::HNodeProxy& node_, int flags_ ) {
@@ -1057,9 +1085,18 @@ int unlink( char const* path_ ) {
 	return ( ret );
 }
 
-int rmdir( char const* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int rmdir( char const* path_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->rmdir( path_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int symlink( char const*, char const* ) {
@@ -1074,17 +1111,35 @@ int rename( char const*, char const* ) {
 
 int link( char const*, char const* ) {
 	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+	return ( -EINVAL );
 }
 
-int chmod( char  const*, mode_t ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int chmod( char const* path_, mode_t mode_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->chmod( path_, mode_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
-int chown( char const*, uid_t, gid_t ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int chown( char const* path_, uid_t uid_, gid_t gid_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->chown( path_, uid_, gid_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int truncate( char const* path_, off_t size_ ) {
