@@ -357,7 +357,7 @@ private:
 			static yaal::hcore::HString const USER;
 			static yaal::hcore::HString const GROUP;
 			static yaal::hcore::HString const SIZE;
-			static yaal::hcore::HString const SYMLINK;
+			static yaal::hcore::HString const TARGET;
 			struct TIME {
 				static yaal::hcore::HString const MODIFICATION;
 				static yaal::hcore::HString const CHANGE;
@@ -924,6 +924,45 @@ public:
 		return;
 		M_EPILOG
 	}
+	void symlink( filesystem::path_t const& target_, filesystem::path_t const& link_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		path_t linkDName( dirname( link_ ) );
+		HXml::HNodeProxy linkBaseDir( get_node_by_path( linkDName ) );
+		try {
+			get_node_it_by_path( link_ );
+		} catch ( HFileSystemException const& e ) {
+			if ( e.code() != -ENOENT ) {
+				throw HFileSystemException( "Link path already exists: "_ys.append( link_ ), -EEXIST );
+			}
+		}
+		HXml::HNodeProxy link( create_node( linkBaseDir, FILE::TYPE::SYMLINK, basename( link_ ), get_mode() ) );
+		HXml::HNode::properties_t& a( link.properties() );
+		a[FILE::PROPERTY::TARGET] = target_;
+		_synced = false;
+		return;
+		M_EPILOG
+	}
+	void readlink( char const* path_, char* buffer_, int size_ ) const {
+		M_PROLOG
+		HLock l( _mutex );
+		if ( size_ <= 0 ) {
+			throw HFileSystemException( "Buffer size not positive: "_ys.append( -EINVAL ) );
+		}
+		HXml::HConstNodeProxy link( get_node_by_path( path_ ) );
+		if ( ! is_symlink( link ) ) {
+			throw HFileSystemException( "Not a symlink:"_ys.append( path_ ), -EINVAL );
+		}
+		HString const& target( link.properties().at( FILE::PROPERTY::TARGET ) );
+		int len( min( static_cast<int>( target.get_length() ), size_ - 1 ) );
+		::strncpy( buffer_, target.raw(), static_cast<size_t>( len ) );
+		buffer_[len] = 0;
+		if ( len < target.get_length() ) {
+			throw HFileSystemException( "", -ENAMETOOLONG );
+		}
+		return;
+		M_EPILOG
+	}
 private:
 	HFileSystem( HFileSystem const& ) = delete;
 	HFileSystem& operator = ( HFileSystem const& ) = delete;
@@ -1004,9 +1043,13 @@ private:
 		components_t path( string::split<components_t>( filesystem::normalize_path( path_ ), "/", HTokenizer::SKIP_EMPTY ) );
 		HXml::HNodeProxy n( _image.get_root() );
 		HXml::HIterator nodeIt;
+		bool haveAccess( true );
 		for ( HString const& name : path ) {
 			if ( ( name == "." ) || ( name == ".." ) ) {
 				throw HFileSystemException( "Bogus path component: "_ys.append( path_ ).append( ": " ).append( name ), -EINVAL );
+			}
+			if ( ! haveAccess ) {
+				throw HFileSystemException( "Access denied.", -EACCES );
 			}
 			bool found( false );
 			for ( HXml::HIterator it( n.begin() ), end( n.end() ); it != end; ++ it ) {
@@ -1017,6 +1060,7 @@ private:
 				if ( ( p != (*it).properties().end() ) && ( p->second == name ) ) {
 					nodeIt = it;
 					n = *it;
+					haveAccess = have_access( n, X_OK );
 					found = true;
 					break;
 				}
@@ -1081,7 +1125,7 @@ private:
 			stat_->st_size = static_cast<off_t>( ( stat_->st_nlink ) * DIR_SIZE );
 		} else if ( type == FILE::TYPE::SYMLINK ) {
 			stat_->st_mode = S_IFLNK;
-			stat_->st_size = p.at( FILE::PROPERTY::SYMLINK ).get_length();
+			stat_->st_size = p.at( FILE::PROPERTY::TARGET ).get_length();
 		} else if ( type == FILE::TYPE::SOCKET ) {
 			stat_->st_mode = S_IFSOCK;
 		} else if ( type == FILE::TYPE::FIFO ) {
@@ -1164,6 +1208,9 @@ private:
 	static bool is_directory( HXml::HConstNodeProxy const& node_ ) {
 		return ( node_.get_name() == FILE::TYPE::DIRECTORY );
 	}
+	static bool is_symlink( HXml::HConstNodeProxy const& node_ ) {
+		return ( node_.get_name() == FILE::TYPE::SYMLINK );
+	}
 };
 yaal::hcore::HString const HFileSystem::ROOT_NODE( "root" );
 yaal::hcore::HString const HFileSystem::FILE::PROPERTY::DEV_ID( "dev_id" );
@@ -1177,7 +1224,7 @@ yaal::hcore::HString const HFileSystem::FILE::PROPERTY::SIZE( "size" );
 yaal::hcore::HString const HFileSystem::FILE::PROPERTY::TIME::MODIFICATION( "mtime" );
 yaal::hcore::HString const HFileSystem::FILE::PROPERTY::TIME::CHANGE( "ctime" );
 yaal::hcore::HString const HFileSystem::FILE::PROPERTY::TIME::ACCESS( "atime" );
-yaal::hcore::HString const HFileSystem::FILE::PROPERTY::SYMLINK( "symlink" );
+yaal::hcore::HString const HFileSystem::FILE::PROPERTY::TARGET( "target" );
 yaal::hcore::HString const HFileSystem::FILE::TYPE::PLAIN( "file" );
 yaal::hcore::HString const HFileSystem::FILE::TYPE::DIRECTORY( "dir" );
 yaal::hcore::HString const HFileSystem::FILE::TYPE::SYMLINK( "symlink" );
@@ -1206,9 +1253,18 @@ int getattr( char const* path_, struct stat* stat_ ) {
 	return ( ret );
 }
 
-int readlink( char const*, char*, size_t ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int readlink( char const* path_, char* buffer_, size_t size_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->readlink( path_, buffer_, static_cast<int>( size_ ) );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
+	}
+	return ( ret );
 }
 
 int open( char const* path_, struct fuse_file_info* info_ ) {
@@ -1272,9 +1328,18 @@ int rmdir( char const* path_ ) {
 	return ( ret );
 }
 
-int symlink( char const*, char const* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int symlink( char const* target_, char const* link_ ) {
+	if ( setup._debug ) {
+		log_trace << link_ << "->" << target_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->symlink( target_, link_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int rename( char const* from_, char const* to_ ) {
