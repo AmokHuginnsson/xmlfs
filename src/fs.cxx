@@ -282,10 +282,9 @@ public:
 			M_PROLOG
 			M_ASSERT( _state == STATE::META );
 			if ( _size > 0 ) {
-				M_ASSERT( _node.child_count() == 1 );
 				HXml::HNodeProxy value( *content() );
 				HString const& data( value.get_value() );
-				HMemoryObserver srcMem( const_cast<char*>( data.raw() ), data.get_size() );
+				HMemoryObserver srcMem( const_cast<char*>( data.raw() ), data.get_size() - data.reverse_find_other_than( _whiteSpace_.data() ) );
 				HMemoryProvider dstMem( _data, 0 );
 				HMemory src( srcMem );
 				HMemory dst( dstMem );
