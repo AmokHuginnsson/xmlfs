@@ -671,7 +671,7 @@ public:
 		return;
 		M_EPILOG
 	}
-	int listxattr( char const* path_, char* buffer_, size_t size_ ) const {
+	int listxattr( char const* path_, char* buffer_, int size_ ) const {
 		M_PROLOG
 		HLock l( _mutex );
 		HXml::HConstNodeProxy n( get_node_by_path( path_ ) );
@@ -683,31 +683,41 @@ public:
 				break;
 			}
 		}
-		int ret( 0 );
+		int size( 0 );
 		if ( ok ) {
-			typedef HArray<HString const*> names_t;
-			names_t names;
-			int total( 0 );
 			for ( HXml::HConstNodeProxy ns : n ) {
+				HString const& nsn( ns.get_name() );
+				int nss( static_cast<int>( nsn.get_size() ) );
 				for ( HXml::HConstNodeProxy attr : ns ) {
-					names.push_back( &attr.get_name() );
-					total += static_cast<int>( attr.get_name().get_size() + 1 );
+					if ( size_ > 0 ) {
+						if ( ( size + nss + 1 ) > size_ ) {
+							throw HFileSystemException( "Buffer too small (ns).", -ERANGE );
+						}
+						::memcpy( buffer_ + size, nsn.c_str(), static_cast<int unsigned>( nss ) );
+					}
+					size += nss;
+					if ( size_ > 0 ) {
+						buffer_[size] = '.';
+					}
+					++ size;
+
+					HString const& an( attr.get_name() );
+					int as( static_cast<int>( an.get_size() ) );
+					if ( size_ > 0 ) {
+						if ( ( size + as + 1 ) > size_ ) {
+							throw HFileSystemException( "Buffer too small.", -ERANGE );
+						}
+						::memcpy( buffer_ + size, an.c_str(), static_cast<int unsigned>( as ) );
+					}
+					size += as;
+					if ( size_ > 0 ) {
+						buffer_[size] = 0;
+					}
+					++ size;
 				}
-			}
-			ret = total;
-			if ( total <= static_cast<int>( size_ ) ) {
-				int offset( 0 );
-				for ( HString const* s : names ) {
-					::memcpy( buffer_ + offset, s->c_str(), static_cast<int unsigned>( s->get_size() ) );
-					offset += static_cast<int>( s->get_size() );
-					buffer_[offset] = 0;
-					++ offset;
-				}
-			} else if ( size_ > 0 ) {
-				ret = -ERANGE;
 			}
 		}
-		return ( ret );
+		return ( size );
 		M_EPILOG
 	}
 	void utimens( char const* path_, struct timespec const time_[2] ) {
@@ -1394,11 +1404,11 @@ int getxattr( char const* path_, char const* name_, char* buffer_, size_t size_ 
 
 int listxattr( char const* path_, char* buffer_, size_t size_ ) {
 	if ( setup._debug ) {
-		log_trace << path_ << endl;
+		log_trace << path_ << ", buffer size = " << size_ <<  endl;
 	}
 	int ret( 0 );
 	try {
-		ret = _fs_->listxattr( path_, buffer_, size_ );
+		ret = _fs_->listxattr( path_, buffer_, static_cast<int>( size_ ) );
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
