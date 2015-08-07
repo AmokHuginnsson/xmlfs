@@ -521,10 +521,12 @@ public:
 		filler_( buf_, ".", &s, 0 );
 		filler_( buf_, "..", NULL, 0 );
 		for ( HXml::HConstNodeProxy const& c : n ) {
-			HString const& name( c.properties().at( FILE::PROPERTY::NAME ) );
-			get_stat( c, &s );
-			if ( filler_( buf_, name.c_str(), &s, 0 ) ) {
-				throw HFileSystemException( "Directory buffer is full." );
+			if ( c.get_name() != FILE::CONTENT::XATTR ) {
+				HString const& name( c.properties().at( FILE::PROPERTY::NAME ) );
+				get_stat( c, &s );
+				if ( filler_( buf_, name.c_str(), &s, 0 ) ) {
+					throw HFileSystemException( "Directory buffer is full." );
+				}
 			}
 		}
 		return;
