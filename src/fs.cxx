@@ -141,7 +141,7 @@ public:
 					}
 				}
 				if ( _size > 0 ) {
-					HMemoryProvider srcMem( _data, _size );
+					HMemoryObserver srcMem( _data.raw(), _size );
 					HMemoryProvider dstMem( _encoded, 0 );
 					HMemory src( srcMem );
 					HMemory dst( dstMem );
@@ -272,7 +272,7 @@ public:
 				(*dst_)->buf[0].mem = memory::alloc( toRead );
 				(*dst_)->buf[0].size = static_cast<size_t>( toRead );
 				(*dst_)->count = 1;
-				::memcpy( (*dst_)->buf[0].mem, _data.get<char const*>() + offset_, static_cast<size_t>( toRead ) );
+				::memcpy( (*dst_)->buf[0].mem, _data.get<char const>() + offset_, static_cast<size_t>( toRead ) );
 			}
 			return ( toRead );
 			M_EPILOG
@@ -284,17 +284,29 @@ public:
 			if ( _size > 0 ) {
 				HXml::HNodeProxy value( *content() );
 				HString const& data( value.get_value() );
-				HMemoryObserver srcMem( const_cast<char*>( data.raw() ), data.get_size() - data.reverse_find_other_than( _whiteSpace_.data() ) );
-				HMemoryProvider dstMem( _data, 0 );
-				HMemory src( srcMem );
-				HMemory dst( dstMem );
-				base64::decode( src, dst );
-				int decodedSize( static_cast<int>( dstMem.get_size() ) );
-				if ( decodedSize == _size ) {
-					_state = STATE::SYNC;
+				int skipStart( static_cast<int>( data.find_other_than( _whiteSpace_.data() ) ) );
+				int skipEnd( static_cast<int>( data.reverse_find_other_than( _whiteSpace_.data() ) ) );
+				int toRead( static_cast<int>( data.get_size() ) - ( skipStart + skipEnd ) );
+//				log_trace << "skipStart = " << skipStart << ", skipEnd = " << skipEnd << ", toRead = " << toRead << endl;
+				if ( toRead > 0 ) {
+					HMemoryObserver srcMem( const_cast<char*>( data.raw() ) + skipStart, toRead );
+					HMemoryProvider dstMem( _data, 0 );
+					HMemory src( srcMem );
+					HMemory dst( dstMem );
+					base64::decode( src, dst );
+					int decodedSize( static_cast<int>( dstMem.get_size() ) );
+					if ( decodedSize == _size ) {
+						_state = STATE::SYNC;
+					} else {
+						log_trace << "Data corruption, expected " << _size << " bytes, got " << decodedSize << endl;
+						_size = decodedSize;
+						_state = STATE::DIRTY;
+					}
 				} else {
-					_size = decodedSize;
+					M_ASSERT( toRead == 0 );
+					_size = 0;
 					_state = STATE::DIRTY;
+					log_trace << "Data corruption, no data has been found when it was expected." << endl;
 				}
 			}
 			return;
@@ -1437,7 +1449,7 @@ int opendir( char const* path_, struct fuse_file_info* info_ ) {
 int readdir( char const* path_, void* buffer_, fuse_fill_dir_t filler_,
 	off_t offset_, struct fuse_file_info* info_ ) {
 	if ( setup._debug ) {
-		log_trace << path_ << "(" << info_->fh << ")" << endl;
+		log_trace << path_ << " (" << info_->fh << ")" << endl;
 	}
 	int ret( 0 );
 	try {
