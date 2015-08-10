@@ -103,6 +103,7 @@ public:
 			if ( is_plain( _node ) ) {
 				_size = lexical_cast<int>( _node.properties().at( FILE::PROPERTY::SIZE ) );
 			} else {
+				M_ASSERT( is_directory( _node ) );
 				_size = get_hard_link_count( _node ) * DIR_SIZE;
 			}
 			return;
@@ -250,6 +251,30 @@ public:
 			return ( written );
 			M_EPILOG
 		}
+		int write( char const* buf_, int size_, int offset_ ) {
+			M_PROLOG
+			if ( size_ < 0 ) {
+				throw HFileSystemException( "Bad offset.", -EINVAL );
+			}
+			if ( offset_ < 0 ) {
+				throw HFileSystemException( "Bad offset.", -EINVAL );
+			}
+			if ( ! is_plain( _node ) ) {
+				throw HFileSystemException( "File is not a plain file.", -EISDIR );
+			}
+			if ( _state == STATE::META ) {
+				if ( _size > 0 ) {
+					decode();
+				}
+			}
+			int newSize( max( _size, offset_ + size_ ) );
+			_data.realloc( newSize );
+			::memcpy( _data.get<char>() + offset_, buf_, static_cast<size_t>( size_ ) );
+			_size = newSize;
+			_state = STATE::DIRTY;
+			return ( _size );
+			M_EPILOG
+		}
 		int read_buf( fuse_bufvec** dst_, int size_, int offset_ ) {
 			M_PROLOG
 			if ( offset_ < 0 ) {
@@ -274,6 +299,27 @@ public:
 				(*dst_)->count = 1;
 				::memcpy( (*dst_)->buf[0].mem, _data.get<char const>() + offset_, static_cast<size_t>( toRead ) );
 			}
+			return ( toRead );
+			M_EPILOG
+		}
+		int read( char* buffer_, int size_, int offset_ ) {
+			M_PROLOG
+			if ( offset_ < 0 ) {
+				throw HFileSystemException( "Bad offset.", -EINVAL );
+			}
+			if ( size_ < 0 ) {
+				throw HFileSystemException( "Bad size.", -EINVAL );
+			}
+			if ( ! is_plain( _node ) ) {
+				throw HFileSystemException( "File is not a plain file.", -EISDIR );
+			}
+			if ( _state == STATE::META ) {
+				if ( _size > 0 ) {
+					decode();
+				}
+			}
+			int toRead( min( max( _size - offset_, 0 ), size_ ) );
+			::memcpy( buffer_, _data.get<char const>() + offset_, static_cast<size_t>( toRead ) );
 			return ( toRead );
 			M_EPILOG
 		}
@@ -822,10 +868,25 @@ public:
 		return ( ret );
 		M_EPILOG
 	}
+	int write( handle_t handle_, char const* buf_, int size_, int offset_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		int ret( descriptor( handle_ ).write( buf_, size_, offset_ ) );
+		_synced = false;
+		return ( ret );
+		M_EPILOG
+	}
 	int read_buf( handle_t handle_, fuse_bufvec** buf_, int size_, int offset_ ) {
 		M_PROLOG
 		HLock l( _mutex );
 		int ret( descriptor( handle_ ).read_buf( buf_, size_, offset_ ) );
+		return ( ret );
+		M_EPILOG
+	}
+	int read( handle_t handle_, char* buf_, int size_, int offset_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		int ret( descriptor( handle_ ).read( buf_, size_, offset_ ) );
 		return ( ret );
 		M_EPILOG
 	}
@@ -1403,15 +1464,39 @@ int truncate( char const* path_, off_t size_ ) {
 	return ( ret );
 }
 
-int read( char  const*, char*, size_t, off_t,
-	struct fuse_file_info* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int read( char const* path_, char* buffer_, size_t size_, off_t offset_,
+	struct fuse_file_info* info_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << ", to read: " << size_ << ", at offset: " << offset_ << endl;
+	}
+	int ret( 0 );
+	try {
+		ret = _fs_->read( info_->fh, buffer_, static_cast<int>( size_ ), static_cast<int>( offset_ ) );
+		if ( setup._debug ) {
+			log_trace << path_ << ", read: " << ret << endl;
+		}
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
+	}
+	return ( ret );
 }
 
-int write( char const*, char const*, size_t, off_t, struct fuse_file_info* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int write( char const* path_, char const* buffer_, size_t size_, off_t offset_, struct fuse_file_info* info_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << ", to write: " << size_ << endl;
+	}
+	int ret( 0 );
+	try {
+		ret = _fs_->write( info_->fh, buffer_, static_cast<int>( size_ ), static_cast<int>( offset_ ) );
+		if ( setup._debug ) {
+			log_trace << path_ << ", written: " << ret << endl;
+		}
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
+	}
+	return ( ret );
 }
 
 int statfs( char const*, struct statvfs * ) {
