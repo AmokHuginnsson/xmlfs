@@ -121,7 +121,10 @@ public:
 		}
 		void flush( void ) {
 			M_PROLOG
-			if ( is_plain( _node ) && ( _state == STATE::DIRTY ) ) {
+			if ( ! is_plain( _node ) ) {
+				throw HFileSystemException( "File is not a plain file.", -EISDIR );
+			}
+			if ( _state == STATE::DIRTY ) {
 				int oldSize( lexical_cast<int>( _node.properties().at( FILE::PROPERTY::SIZE ) ) );
 				HXml::HNodeProxy value;
 				if ( oldSize > 0 ) {
@@ -323,6 +326,9 @@ public:
 			return ( toRead );
 			M_EPILOG
 		}
+		bool is_flushed( void ) const {
+			return ( _state != STATE::DIRTY );
+		}
 	private:
 		void decode( void ) {
 			M_PROLOG
@@ -430,7 +436,7 @@ public:
 	HFileSystem( yaal::hcore::HString const& imagePath_ )
 		: _imagePath( imagePath_ )
 		, _image()
-		, _devId( 0 )
+		, _devId( static_cast<dev_t>( hash<yaal::hcore::HString>()( imagePath_ ) ) )
 		, _inodes()
 		, _descriptors()
 		, _synced( false )
@@ -445,7 +451,6 @@ public:
 			HXml::HConstNodeProxy n( _image.get_root() );
 			HXml::HNode::properties_t const& p( n.properties() );
 			_inodeGenerator.store( lexical_cast<u64_t>( p.at( FILE::PROPERTY::INODE_NEXT ) ) );
-			_devId = lexical_cast<dev_t>( p.at( FILE::PROPERTY::DEV_ID ) );
 		} else {
 			log( LOG_LEVEL::WARNING ) << "Creating new, empty file system at: " << _imagePath << endl;
 			_image.create_root( FILE::TYPE::DIRECTORY );
@@ -461,7 +466,6 @@ public:
 			p.insert( make_pair( FILE::PROPERTY::USER, to_string( getuid() ) ) );
 			p.insert( make_pair( FILE::PROPERTY::GROUP, to_string( getgid() ) ) );
 			_inodeGenerator.store( 1 );
-			_devId = randomizer_helper::make_randomizer()();
 			p.insert( make_pair( FILE::PROPERTY::INODE, to_string( _inodeGenerator ++ ) ) );
 			p.insert( make_pair( FILE::PROPERTY::INODE_NEXT, to_string( _inodeGenerator.load() ) ) );
 			_synced = false;
@@ -1024,6 +1028,51 @@ public:
 		return;
 		M_EPILOG
 	}
+	void fsync( handle_t handle_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		descriptor( handle_ ).flush();
+		save();
+		for ( descriptors_t::value_type const& di : _descriptors ) {
+			if ( ! di.second.is_flushed() ) {
+				_synced = false;
+				break;
+			}
+		}
+		return;
+		M_EPILOG
+	}
+	void fsyncdir( handle_t handle_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		inodes_t::iterator inodeIt( _inodes.find( handle_ ) );
+		if ( ! ( inodeIt != _inodes.end() ) ) {
+			throw HFileSystemException( "Invalid handle: "_ys.append( handle_ ), -EBADF );
+		}
+		u64_t inode( inodeIt->second );
+		for ( descriptors_t::value_type& di : _descriptors ) {
+			HXml::HNodeProxy p( di.second.node() );
+			if ( ! is_plain( p ) ) {
+				continue;
+			}
+			while ( !! p ) {
+				if ( p.properties().at( FILE::PROPERTY::INODE ) == inode ) {
+					di.second.flush();
+					break;
+				}
+				p = p.get_parent();
+			}
+		}
+		save();
+		for ( descriptors_t::value_type const& di : _descriptors ) {
+			if ( ! di.second.is_flushed() ) {
+				_synced = false;
+				break;
+			}
+		}
+		return;
+		M_EPILOG
+	}
 private:
 	HFileSystem( HFileSystem const& ) = delete;
 	HFileSystem& operator = ( HFileSystem const& ) = delete;
@@ -1532,9 +1581,18 @@ int release( char const* path_, struct fuse_file_info* info_ ) {
 	return ( ret );
 }
 
-int fsync( char const*, int, struct fuse_file_info* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int fsync( char const* path_, int, struct fuse_file_info* info_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->fsync( info_->fh );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int setxattr( char const* path_, char const* name_, char const* value_, size_t size_, int flags_ ) {
@@ -1627,9 +1685,18 @@ int releasedir( char const* path_, struct fuse_file_info* info_ ) {
 	return ( ret );
 }
 
-int fsyncdir( char const*, int, struct fuse_file_info* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int fsyncdir( char const* path_, int, struct fuse_file_info* info_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->fsyncdir( info_->fh );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 void* init( struct fuse_conn_info* info_ ) {
