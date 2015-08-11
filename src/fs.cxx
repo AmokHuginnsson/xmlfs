@@ -734,6 +734,59 @@ public:
 		return;
 		M_EPILOG
 	}
+	void removexattr( char const* path_, HString const& name_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		HXml::HNodeProxy node( get_node_by_path( path_ ) );
+		int pos( static_cast<int>( name_.find( '.' ) ) );
+		if ( pos == HString::npos ) {
+			throw HFileSystemException( "Invalid attribute name: "_ys.append( name_ ), -EINVAL );
+		}
+		bool ok( false );
+		HXml::HIterator nodeIt( node.begin() );
+		for ( HXml::HIterator end( node.end() ); nodeIt != end; ++ nodeIt ) {
+			if ( ( (*nodeIt).get_type() == HXml::HNode::TYPE::NODE ) && ( (*nodeIt).get_name() == FILE::CONTENT::XATTR ) ) {
+				ok = true;
+				break;
+			}
+		}
+		if ( ! ok ) {
+			throw HFileSystemException( "Attribute does not exist: "_ys.append( name_ ), -ENOATTR );
+		}
+		ok = false;
+		HString ns( name_.left( pos ) );
+		HXml::HIterator nsIt( (*nodeIt).begin() );
+		for ( HXml::HIterator end( (*nodeIt).end() ); nsIt != end; ++ nsIt ) {
+			if ( (*nsIt).get_name() == ns ) {
+				ok = true;
+				break;
+			}
+		}
+		if ( ! ok ) {
+			throw HFileSystemException( "Attribute does not exist: "_ys.append( name_ ), -ENOATTR );
+		}
+		ok = false;
+		HString name( name_.mid( pos + 1 ) );
+		for ( HXml::HIterator it( (*nsIt).begin() ), end( (*nsIt).end() ); it != end; ++ it ) {
+			if ( (*it).get_name() == name ) {
+				ok = true;
+				(*nsIt).remove_node( it );
+				if ( ! (*nsIt).has_childs() ) {
+					(*nodeIt).remove_node( nsIt );
+				}
+				if ( ! (*nodeIt).has_childs() ) {
+					node.remove_node( nodeIt );
+				}
+				break;
+			}
+		}
+		if ( ! ok ) {
+			throw HFileSystemException( "Attribute does not exist: "_ys.append( name_ ), -ENOATTR );
+		}
+		_synced = false;
+		return;
+		M_EPILOG
+	}
 	int listxattr( char const* path_, char* buffer_, int size_ ) const {
 		M_PROLOG
 		HLock l( _mutex );
@@ -1073,7 +1126,7 @@ public:
 		return;
 		M_EPILOG
 	}
-	void mknod( char const* path_, dev_t dev_, mode_t mode_ ) {
+	void mknod( char const* path_, mode_t mode_, dev_t dev_ ) {
 		M_PROLOG
 		HLock l( _mutex );
 		path_t nodeDName( dirname( path_ ) );
@@ -1435,7 +1488,7 @@ int mknod( char const* path_, mode_t mode_, dev_t dev_ ) {
 	}
 	int ret( 0 );
 	try {
-		_fs_->mknod( path_, dev_, mode_ );
+		_fs_->mknod( path_, mode_, dev_ );
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
@@ -1684,9 +1737,18 @@ int listxattr( char const* path_, char* buffer_, size_t size_ ) {
 	return ( ret );
 }
 
-int removexattr( char const*, char const* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int removexattr( char const* path_, char const* name_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << ": " << name_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->removexattr( path_, name_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int opendir( char const* path_, struct fuse_file_info* info_ ) {
