@@ -1073,6 +1073,42 @@ public:
 		return;
 		M_EPILOG
 	}
+	void mknod( char const* path_, dev_t dev_, mode_t mode_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		path_t nodeDName( dirname( path_ ) );
+		HXml::HNodeProxy nodeBaseDir( get_node_by_path( nodeDName ) );
+		try {
+			get_node_it_by_path( path_ );
+		} catch ( HFileSystemException const& e ) {
+			if ( e.code() != -ENOENT ) {
+				throw HFileSystemException( "Link path already exists: "_ys.append( path_ ), -EEXIST );
+			}
+		}
+		HString const* type( &FILE::TYPE::PLAIN );
+		bool dev( false );
+		if ( S_ISBLK( mode_ ) ) {
+			type = &FILE::TYPE::DEVICE::BLOCK;
+			dev = true;
+		} else if ( S_ISCHR( mode_ ) ) {
+			type = &FILE::TYPE::DEVICE::CHARACTER;
+			dev = true;
+		} else if ( S_ISSOCK( mode_ ) ) {
+			type = &FILE::TYPE::SOCKET;
+		} else if ( S_ISFIFO( mode_ ) ) {
+			type = &FILE::TYPE::FIFO;
+		} else {
+			M_ENSURE( S_ISREG( mode_ ) );
+		}
+		HXml::HNodeProxy node( create_node( nodeBaseDir, *type, basename( path_ ), mode_ ) );
+		if ( dev ) {
+			HXml::HNode::properties_t& a( node.properties() );
+			a[FILE::PROPERTY::DEV_ID] = dev_;
+		}
+		_synced = false;
+		return;
+		M_EPILOG
+	}
 private:
 	HFileSystem( HFileSystem const& ) = delete;
 	HFileSystem& operator = ( HFileSystem const& ) = delete;
@@ -1242,8 +1278,10 @@ private:
 			stat_->st_mode = S_IFIFO;
 		} else if ( type == FILE::TYPE::DEVICE::BLOCK ) {
 			stat_->st_mode = S_IFBLK;
+			stat_->st_rdev = lexical_cast<dev_t>( p.at( FILE::PROPERTY::DEV_ID ) );
 		} else if ( type == FILE::TYPE::DEVICE::CHARACTER ) {
 			stat_->st_mode = S_IFCHR;
+			stat_->st_rdev = lexical_cast<dev_t>( p.at( FILE::PROPERTY::DEV_ID ) );
 		} else {
 			throw HFileSystemException( "Bad file type: "_ys.append( type ) );
 		}
@@ -1391,9 +1429,18 @@ int open( char const* path_, struct fuse_file_info* info_ ) {
 	return ( ret );
 }
 
-int mknod( char const*, mode_t, dev_t ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int mknod( char const* path_, mode_t mode_, dev_t dev_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->mknod( path_, dev_, mode_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int mkdir( char const* path_, mode_t mode_ ) {
@@ -1466,8 +1513,8 @@ int rename( char const* from_, char const* to_ ) {
 	return ( ret );
 }
 
-int link( char const*, char const* ) {
-	log << __PRETTY_FUNCTION__ << endl;
+int link( char const* link_, char const* target_ ) {
+	log_trace << "Unimplemented for: " << link_ << "->" << target_ << endl;
 	return ( -EINVAL );
 }
 
