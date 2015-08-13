@@ -90,6 +90,7 @@ public:
 		yaal::hcore::HChunk _encoded;
 		pid_t _owner;
 		int _openCount;
+		u64_t _flockOwner;
 		STATE _state;
 	public:
 		HDescriptor( tools::HXml::HNodeProxy const& node_, OPEN_MODE openMode_ )
@@ -100,6 +101,7 @@ public:
 			, _encoded()
 			, _owner( NO_OWNER )
 			, _openCount( 0 )
+			, _flockOwner( static_cast<u64_t>( NO_OWNER ) )
 			, _state( STATE::META ) {
 			if ( is_plain( _node ) ) {
 				_size = lexical_cast<int>( _node.properties().at( FILE::PROPERTY::SIZE ) );
@@ -198,6 +200,35 @@ public:
 					} break;
 					default: {
 						throw HFileSystemException( "Invalid lock command.", -EINVAL );
+					}
+				}
+			}
+			return;
+			M_EPILOG
+		}
+		void flock( yaal::hcore::HCondition& condition_, u64_t owner_, int lock_ ) {
+			M_PROLOG
+			switch ( lock_ & ~LOCK_NB ) {
+				case ( LOCK_SH ):
+				case ( LOCK_EX ): {
+					if ( _flockOwner != static_cast<u64_t>( NO_OWNER ) ) {
+						if ( lock_ & LOCK_NB ) {
+							throw HFileSystemException( "Call would block.", -EWOULDBLOCK );
+						} else {
+							while ( _flockOwner != static_cast<u64_t>( NO_OWNER ) ) {
+								condition_.wait_for();
+							}
+						}
+					} else {
+						_flockOwner = owner_;
+					}
+				} break;
+				case ( LOCK_UN ): {
+					if ( owner_ == _flockOwner ) {
+						_flockOwner = static_cast<u64_t>( NO_OWNER );
+						condition_.signal();
+					} else {
+						throw HFileSystemException( "Not locked by caller.", -EINVAL );
 					}
 				}
 			}
@@ -397,6 +428,7 @@ private:
 	descriptor_generator_t _descriptorGenerator;
 	available_descriptors_t _availableDescriptors;
 	mutable yaal::hcore::HMutex _mutex;
+	mutable yaal::hcore::HCondition _condition;
 	static yaal::hcore::HString const ROOT_NODE;
 	static blksize_t const BLOCK_SIZE = 512;
 	static handle_t const INVALID_HANDLE = static_cast<handle_t>( -1 );
@@ -444,7 +476,8 @@ public:
 		, _inodeGenerator( 0 )
 		, _descriptorGenerator( 0 )
 		, _availableDescriptors()
-		, _mutex() {
+		, _mutex()
+		, _condition( _mutex ) {
 		M_PROLOG
 		if ( filesystem::exists( _imagePath ) ) {
 			_image.load( tools::ensure( make_pointer<HFile>( _imagePath, HFile::OPEN::READING ) ) );
@@ -511,9 +544,9 @@ public:
 		return ( h );
 		M_EPILOG
 	}
-	void releasedir( handle_t handle_ ) {
+	void releasedir( handle_t handle_, bool unlock_, u64_t owner_ ) {
 		M_PROLOG
-		release( handle_ );
+		release( handle_, unlock_, owner_ );
 		return;
 		M_EPILOG
 	}
@@ -529,7 +562,7 @@ public:
 		return ( h );
 		M_EPILOG
 	}
-	void release( handle_t handle_ ) {
+	void release( handle_t handle_, bool unlock_, u64_t owner_ ) {
 		M_PROLOG
 		HLock l( _mutex );
 		inodes_t::iterator inodeIt( _inodes.find( handle_ ) );
@@ -539,6 +572,9 @@ public:
 		descriptors_t::iterator descIt( _descriptors.find( inodeIt->second ) );
 		M_ASSERT( descIt != _descriptors.end() );
 		descIt->second.dec_open_count();
+		if ( unlock_ ) {
+			descIt->second.flock( _condition, owner_, LOCK_UN );
+		}
 		if ( ! descIt->second.is_opened() ) {
 			_descriptors.erase( descIt );
 		}
@@ -1175,6 +1211,13 @@ public:
 		return;
 		M_EPILOG
 	}
+	void flock( handle_t handle_, u64_t owner_, int lock_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		descriptor( handle_ ).flock( _condition, owner_, lock_ );
+		return;
+		M_EPILOG
+	}
 private:
 	HFileSystem( HFileSystem const& ) = delete;
 	HFileSystem& operator = ( HFileSystem const& ) = delete;
@@ -1686,7 +1729,7 @@ int release( char const* path_, struct fuse_file_info* info_ ) {
 	}
 	int ret( 0 );
 	try {
-		_fs_->release( info_->fh );
+		_fs_->release( info_->fh, info_->flock_release ? true : false, info_->lock_owner );
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
@@ -1799,7 +1842,7 @@ int releasedir( char const* path_, struct fuse_file_info* info_ ) {
 	}
 	int ret( 0 );
 	try {
-		_fs_->releasedir( info_->fh );
+		_fs_->releasedir( info_->fh, info_->flock_release ? true : false, info_->lock_owner );
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
@@ -1935,9 +1978,11 @@ int utimens( char const* path_, struct timespec const time_[2] ) {
 	return ( ret );
 }
 
-int bmap( char const*, size_t, uint64_t* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int bmap( char const* path_, size_t, uint64_t* ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	return ( -EINVAL );
 }
 
 int ioctl( char const* path_, int cmd_, void*, struct fuse_file_info*, int unsigned, void* ) {
@@ -1996,9 +2041,18 @@ int read_buf( char const* path_, struct fuse_bufvec** dst_, size_t size_, off_t 
 	return ( ret );
 }
 
-int flock( char const*, struct fuse_file_info*, int ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int flock( char const* path_, struct fuse_file_info* info_, int lock_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->flock( info_->fh, info_->lock_owner, lock_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
+	}
+	return ( ret );
 }
 
 int fallocate( char const* path_, int, off_t offset_, off_t size_, struct fuse_file_info* ) {
