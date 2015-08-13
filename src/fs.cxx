@@ -1218,6 +1218,29 @@ public:
 		return;
 		M_EPILOG
 	}
+	void statfs( struct statvfs* stat_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		struct statvfs underlying;
+		::memset( &underlying, 0, sizeof ( underlying ) );
+		::statvfs( _imagePath.raw(), &underlying );
+		::memset( stat_, 0, sizeof ( *stat_ ) );
+		int count( 0 );
+		int size( 0 );
+		stat( _image.get_root(), count, size );
+		stat_->f_bsize = BLOCK_SIZE;
+		stat_->f_frsize = underlying.f_frsize;
+		stat_->f_blocks = static_cast<long unsigned>( size ) / stat_->f_bsize;
+		stat_->f_bfree = stat_->f_blocks * 2;
+		stat_->f_bavail = stat_->f_blocks * 2;
+		stat_->f_files = static_cast<fsfilcnt_t>( count );
+		stat_->f_ffree = static_cast<fsfilcnt_t>( count * 2 );
+		stat_->f_favail = static_cast<fsfilcnt_t>( count * 2 );
+		stat_->f_namemax = underlying.f_namemax;
+		stat_->f_fsid = _devId;
+		return;
+		M_EPILOG
+	}
 private:
 	HFileSystem( HFileSystem const& ) = delete;
 	HFileSystem& operator = ( HFileSystem const& ) = delete;
@@ -1234,6 +1257,21 @@ private:
 	void release_handle( handle_t handle_ ) {
 		M_PROLOG
 		_availableDescriptors.push( handle_ );
+		return;
+		M_EPILOG
+	}
+	void stat( HXml::HConstNodeProxy const& node_, int& count_, int& size_ ) {
+		M_PROLOG
+		for ( HXml::HConstNodeProxy const& c : node_ ) {
+			if ( is_directory( c ) ) {
+				stat( c, count_, size_ );
+				size_ += DIR_SIZE;
+			}
+			++ count_;
+		}
+		if ( is_plain( node_ ) ) {
+			size_ += lexical_cast<int>( node_.properties().at( FILE::PROPERTY::SIZE ) );
+		}
 		return;
 		M_EPILOG
 	}
@@ -1704,9 +1742,18 @@ int write( char const* path_, char const* buffer_, size_t size_, off_t offset_, 
 	return ( ret );
 }
 
-int statfs( char const*, struct statvfs * ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int statfs( char const* path_, struct statvfs* stat_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->statfs( stat_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << endl;
+	}
+	return ( ret );
 }
 
 int flush( char const* path_, struct fuse_file_info* info_ ) {
