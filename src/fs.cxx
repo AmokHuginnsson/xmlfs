@@ -32,6 +32,7 @@ Copyright:
 #include <unistd.h>
 #define FUSE_USE_VERSION 29
 #include <fuse.h>
+#include <poll.h>
 #include <sys/xattr.h>
 #include <attr/xattr.h>
 
@@ -1162,6 +1163,18 @@ public:
 		return;
 		M_EPILOG
 	}
+	void poll( handle_t handle_, struct fuse_pollhandle* pollHandle_, int unsigned* revents_ ) {
+		M_PROLOG
+		HLock l( _mutex );
+		descriptor( handle_ );
+		if ( pollHandle_ && revents_ ) {
+			*revents_ = POLLIN | POLLOUT;
+			fuse_notify_poll( pollHandle_ );
+			fuse_pollhandle_destroy( pollHandle_ );
+		}
+		return;
+		M_EPILOG
+	}
 private:
 	HFileSystem( HFileSystem const& ) = delete;
 	HFileSystem& operator = ( HFileSystem const& ) = delete;
@@ -1927,14 +1940,25 @@ int bmap( char const*, size_t, uint64_t* ) {
 	return ( -1 );
 }
 
-int ioctl( char const*, int, void*, struct fuse_file_info*, int unsigned, void* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int ioctl( char const* path_, int cmd_, void*, struct fuse_file_info*, int unsigned, void* ) {
+	if ( setup._debug ) {
+		log_trace << path_ << ", command = " << cmd_ << endl;
+	}
+	return ( -EINVAL );
 }
 
-int poll( char const*, struct fuse_file_info*, struct fuse_pollhandle*, int unsigned* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int poll( char const* path_, struct fuse_file_info* info_, struct fuse_pollhandle* handle_, int unsigned* revents_ ) {
+	if ( setup._debug ) {
+		log_trace << path_ << endl;
+	}
+	int ret( 0 );
+	try {
+		_fs_->poll( info_->fh, handle_, revents_ );
+	} catch ( HException const& e ) {
+		ret = e.code();
+		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
+	}
+	return ( ret );
 }
 
 int write_buf( char const* path_, struct fuse_bufvec* src_, off_t offset_, struct fuse_file_info* info_ ) {
@@ -1977,9 +2001,11 @@ int flock( char const*, struct fuse_file_info*, int ) {
 	return ( -1 );
 }
 
-int fallocate( char const*, int, off_t, off_t, struct fuse_file_info* ) {
-	log << __PRETTY_FUNCTION__ << endl;
-	return ( -1 );
+int fallocate( char const* path_, int, off_t offset_, off_t size_, struct fuse_file_info* ) {
+	if ( setup._debug ) {
+		log_trace << path_ << ", to allocate: " << size_ << ", at offset: " << offset_ << endl;
+	}
+	return ( -EOPNOTSUPP );
 }
 
 }
