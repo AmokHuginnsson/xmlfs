@@ -4,7 +4,6 @@ dnl It is expected that client applications have link to yaal's _aux.
 dnl This macro has to be here due to primitivism of libtoolize.
 AC_CONFIG_AUX_DIR([_aux])
 m4_include([_aux/client-configure.m4])
-m4_include([/usr/share/aclocal/pkg.m4])
-PKG_CHECK_MODULES(XMLFS, [fuse >= 2.3])
 YAAL_CONFIGURE_CLIENT_INIT(xmlfs,MY_PACKAGE_VERSION)
+PKG_CHECK_MODULES(FUSE, [fuse >= 2.3])
 YAAL_CONFIGURE_CLIENT_FINALIZE
