@@ -34,11 +34,11 @@ Copyright:
 #include <fuse.h>
 #include <poll.h>
 #include <sys/xattr.h>
-#ifdef HAVE_XATTR_H
+
+#include "config.hxx"
+#ifdef HAVE_ATTR_XATTR_H
 #include <attr/xattr.h>
-#elif defined ( HAVE_SYS_XATTR_H )
-#include <sys/xattr.h>
-#endif
+#endif /* #ifdef HAVE_ATTR_XATTR_H */
 
 #include <yaal/config.hxx>
 #include <yaal/hcore/hstack.hxx>
@@ -54,7 +54,6 @@ Copyright:
 #include <yaal/tools/base64.hxx>
 M_VCSID( "$Id: " __ID__ " $" )
 //M_VCSID( "$Id: " __TID__ " $" )
-#include "config.hxx"
 #include "fs.hxx"
 #include "setup.hxx"
 
