@@ -34,7 +34,11 @@ Copyright:
 #include <fuse.h>
 #include <poll.h>
 #include <sys/xattr.h>
+#ifdef HAVE_XATTR_H
 #include <attr/xattr.h>
+#elif defined ( HAVE_SYS_XATTR_H )
+#include <sys/xattr.h>
+#endif
 
 #include <yaal/config.hxx>
 #include <yaal/hcore/hstack.hxx>
@@ -206,6 +210,7 @@ public:
 			return;
 			M_EPILOG
 		}
+#ifdef HAVE_FUSE_OPERATIONS_FLOCK
 		void flock( yaal::hcore::HCondition& condition_, u64_t owner_, int lock_ ) {
 			M_PROLOG
 			switch ( lock_ & ~LOCK_NB ) {
@@ -235,6 +240,7 @@ public:
 			return;
 			M_EPILOG
 		}
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_FLOCK */
 		void truncate( int size_ ) {
 			M_PROLOG
 			if ( size_ < 0 ) {
@@ -259,6 +265,7 @@ public:
 			return;
 			M_EPILOG
 		}
+#ifdef HAVE_FUSE_OPERATIONS_WRITE_BUF
 		int write_buf( fuse_bufvec const* buf_, int offset_ ) {
 			M_PROLOG
 			if ( offset_ < 0 ) {
@@ -286,6 +293,7 @@ public:
 			return ( written );
 			M_EPILOG
 		}
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_WRITE_BUF */
 		int write( char const* buf_, int size_, int offset_ ) {
 			M_PROLOG
 			if ( size_ < 0 ) {
@@ -310,6 +318,7 @@ public:
 			return ( _size );
 			M_EPILOG
 		}
+#ifdef HAVE_FUSE_OPERATIONS_READ_BUF
 		int read_buf( fuse_bufvec** dst_, int size_, int offset_ ) {
 			M_PROLOG
 			if ( offset_ < 0 ) {
@@ -337,6 +346,7 @@ public:
 			return ( toRead );
 			M_EPILOG
 		}
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_READ_BUF */
 		int read( char* buffer_, int size_, int offset_ ) {
 			M_PROLOG
 			if ( offset_ < 0 ) {
@@ -544,9 +554,19 @@ public:
 		return ( h );
 		M_EPILOG
 	}
-	void releasedir( handle_t handle_, bool unlock_, u64_t owner_ ) {
+	void releasedir(
+		handle_t handle_
+#ifdef HAVE_FUSE_FILE_INFO_FLOCK_RELEASE
+		, bool unlock_,
+		u64_t owner_
+#endif /* #ifdef HAVE_FUSE_FILE_INFO_FLOCK_RELEASE */
+	) {
 		M_PROLOG
+#ifdef HAVE_FUSE_FILE_INFO_FLOCK_RELEASE
 		release( handle_, unlock_, owner_ );
+#else
+		release( handle_ );
+#endif /* #ifdef HAVE_FUSE_FILE_INFO_FLOCK_RELEASE */
 		return;
 		M_EPILOG
 	}
@@ -562,7 +582,13 @@ public:
 		return ( h );
 		M_EPILOG
 	}
-	void release( handle_t handle_, bool unlock_, u64_t owner_ ) {
+	void release(
+		handle_t handle_
+#ifdef HAVE_FUSE_FILE_INFO_FLOCK_RELEASE
+		, bool unlock_,
+		u64_t owner_
+#endif /* #ifdef HAVE_FUSE_FILE_INFO_FLOCK_RELEASE */
+	) {
 		M_PROLOG
 		HLock l( _mutex );
 		inodes_t::iterator inodeIt( _inodes.find( handle_ ) );
@@ -572,9 +598,11 @@ public:
 		descriptors_t::iterator descIt( _descriptors.find( inodeIt->second ) );
 		M_ASSERT( descIt != _descriptors.end() );
 		descIt->second.dec_open_count();
+#ifdef HAVE_FUSE_OPERATIONS_FLOCK
 		if ( unlock_ ) {
 			descIt->second.flock( _condition, owner_, LOCK_UN );
 		}
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_FLOCK */
 		if ( ! descIt->second.is_opened() ) {
 			_descriptors.erase( descIt );
 		}
@@ -954,6 +982,7 @@ public:
 		return;
 		M_EPILOG
 	}
+#ifdef HAVE_FUSE_OPERATIONS_WRITE_BUF
 	int write_buf( handle_t handle_, fuse_bufvec const* buf_, int offset_ ) {
 		M_PROLOG
 		HLock l( _mutex );
@@ -962,6 +991,7 @@ public:
 		return ( ret );
 		M_EPILOG
 	}
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_WRITE_BUF */
 	int write( handle_t handle_, char const* buf_, int size_, int offset_ ) {
 		M_PROLOG
 		HLock l( _mutex );
@@ -970,6 +1000,7 @@ public:
 		return ( ret );
 		M_EPILOG
 	}
+#ifdef HAVE_FUSE_OPERATIONS_READ_BUF
 	int read_buf( handle_t handle_, fuse_bufvec** buf_, int size_, int offset_ ) {
 		M_PROLOG
 		HLock l( _mutex );
@@ -977,6 +1008,7 @@ public:
 		return ( ret );
 		M_EPILOG
 	}
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_READ_BUF */
 	int read( handle_t handle_, char* buf_, int size_, int offset_ ) {
 		M_PROLOG
 		HLock l( _mutex );
@@ -1199,6 +1231,7 @@ public:
 		return;
 		M_EPILOG
 	}
+#ifdef HAVE_FUSE_OPERATIONS_POLL
 	void poll( handle_t handle_, struct fuse_pollhandle* pollHandle_, int unsigned* revents_ ) {
 		M_PROLOG
 		HLock l( _mutex );
@@ -1211,6 +1244,8 @@ public:
 		return;
 		M_EPILOG
 	}
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_POLL */
+#ifdef HAVE_FUSE_OPERATIONS_FLOCK
 	void flock( handle_t handle_, u64_t owner_, int lock_ ) {
 		M_PROLOG
 		HLock l( _mutex );
@@ -1218,6 +1253,7 @@ public:
 		return;
 		M_EPILOG
 	}
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_FLOCK */
 	void statfs( struct statvfs* stat_ ) {
 		M_PROLOG
 		HLock l( _mutex );
@@ -1776,7 +1812,11 @@ int release( char const* path_, struct fuse_file_info* info_ ) {
 	}
 	int ret( 0 );
 	try {
+#ifdef HAVE_FUSE_FILE_INFO_FLOCK_RELEASE
 		_fs_->release( info_->fh, info_->flock_release ? true : false, info_->lock_owner );
+#else
+		_fs_->release( info_->fh );
+#endif /* #ifdef HAVE_FUSE_FILE_INFO_FLOCK_RELEASE */
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
@@ -1889,7 +1929,11 @@ int releasedir( char const* path_, struct fuse_file_info* info_ ) {
 	}
 	int ret( 0 );
 	try {
+#ifdef HAVE_FUSE_FILE_INFO_FLOCK_RELEASE
 		_fs_->releasedir( info_->fh, info_->flock_release ? true : false, info_->lock_owner );
+#else
+		_fs_->releasedir( info_->fh );
+#endif /* #ifdef HAVE_FUSE_FILE_INFO_FLOCK_RELEASE */
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
@@ -1917,7 +1961,9 @@ void* init( struct fuse_conn_info* info_ ) {
 	}
 	info_->async_read = false;
 	info_->max_readahead = 0;
+#ifdef HAVE_FUSE_CONN_INFO_WANT
 	info_->want = 0;
+#endif /* #ifdef HAVE_FUSE_CONN_INFO_WANT */
 	try {
 		_fs_ = make_pointer<HFileSystem>( setup._fsFilePath );
 	} catch ( HException const& e ) {
@@ -2032,13 +2078,16 @@ int bmap( char const* path_, size_t, uint64_t* ) {
 	return ( -EINVAL );
 }
 
+#ifdef HAVE_FUSE_OPERATIONS_IOCTL
 int ioctl( char const* path_, int cmd_, void*, struct fuse_file_info*, int unsigned, void* ) {
 	if ( setup._debug ) {
 		log_trace << path_ << ", command = " << cmd_ << endl;
 	}
 	return ( -EINVAL );
 }
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_IOCTL */
 
+#ifdef HAVE_FUSE_OPERATIONS_POLL
 int poll( char const* path_, struct fuse_file_info* info_, struct fuse_pollhandle* handle_, int unsigned* revents_ ) {
 	if ( setup._debug ) {
 		log_trace << path_ << endl;
@@ -2052,7 +2101,9 @@ int poll( char const* path_, struct fuse_file_info* info_, struct fuse_pollhandl
 	}
 	return ( ret );
 }
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_POLL */
 
+#ifdef HAVE_FUSE_OPERATIONS_WRITE_BUF
 int write_buf( char const* path_, struct fuse_bufvec* src_, off_t offset_, struct fuse_file_info* info_ ) {
 	if ( setup._debug ) {
 		int toWrite( static_cast<int>( fuse_buf_size( src_ ) ) );
@@ -2070,7 +2121,9 @@ int write_buf( char const* path_, struct fuse_bufvec* src_, off_t offset_, struc
 	}
 	return ( ret );
 }
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_WRITE_BUF */
 
+#ifdef HAVE_FUSE_OPERATIONS_READ_BUF
 int read_buf( char const* path_, struct fuse_bufvec** dst_, size_t size_, off_t offset_, struct fuse_file_info* info_ ) {
 	if ( setup._debug ) {
 		log_trace << path_ << ", to read: " << size_ << ", at offset: " << offset_ << endl;
@@ -2087,7 +2140,9 @@ int read_buf( char const* path_, struct fuse_bufvec** dst_, size_t size_, off_t 
 	}
 	return ( ret );
 }
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_READ_BUF */
 
+#ifdef HAVE_FUSE_OPERATIONS_FLOCK
 int flock( char const* path_, struct fuse_file_info* info_, int lock_ ) {
 	if ( setup._debug ) {
 		log_trace << path_ << endl;
@@ -2101,13 +2156,16 @@ int flock( char const* path_, struct fuse_file_info* info_, int lock_ ) {
 	}
 	return ( ret );
 }
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_FLOCK */
 
+#ifdef HAVE_FUSE_OPERATIONS_FALLOCATE
 int fallocate( char const* path_, int, off_t offset_, off_t size_, struct fuse_file_info* ) {
 	if ( setup._debug ) {
 		log_trace << path_ << ", to allocate: " << size_ << ", at offset: " << offset_ << endl;
 	}
 	return ( -EOPNOTSUPP );
 }
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_FALLOCATE */
 
 }
 
@@ -2121,9 +2179,13 @@ int main( int argc_, char** argv_ ) {
 	xmlfsFuse.chown       = &chown;
 	xmlfsFuse.create      = &create;
 	xmlfsFuse.destroy     = &destroy;
+#ifdef HAVE_FUSE_OPERATIONS_FALLOCATE
 	xmlfsFuse.fallocate   = &fallocate;
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_FALLOCATE */
 	xmlfsFuse.fgetattr    = &fgetattr;
+#ifdef HAVE_FUSE_OPERATIONS_FLOCK
 	xmlfsFuse.flock       = &flock;
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_FLOCK */
 	xmlfsFuse.flush       = &flush;
 	xmlfsFuse.fsync       = &fsync;
 	xmlfsFuse.fsyncdir    = &fsyncdir;
@@ -2132,7 +2194,9 @@ int main( int argc_, char** argv_ ) {
 	xmlfsFuse.getdir      = nullptr;
 	xmlfsFuse.getxattr    = &getxattr;
 	xmlfsFuse.init        = &init;
+#ifdef HAVE_FUSE_OPERATIONS_IOCTL
 	xmlfsFuse.ioctl       = &ioctl;
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_IOCTL */
 	xmlfsFuse.link        = &link;
 	xmlfsFuse.listxattr   = &listxattr;
 	xmlfsFuse.lock        = &lock;
@@ -2140,9 +2204,13 @@ int main( int argc_, char** argv_ ) {
 	xmlfsFuse.mknod       = &mknod;
 	xmlfsFuse.open        = &open;
 	xmlfsFuse.opendir     = &opendir;
+#ifdef HAVE_FUSE_OPERATIONS_POLL
 	xmlfsFuse.poll        = &poll;
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_POLL */
 	xmlfsFuse.read        = &read;
+#ifdef HAVE_FUSE_OPERATIONS_READ_BUF
 	xmlfsFuse.read_buf    = &read_buf;
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_READ_BUF */
 	xmlfsFuse.readdir     = &readdir;
 	xmlfsFuse.readlink    = &readlink;
 	xmlfsFuse.release     = &release;
@@ -2158,7 +2226,9 @@ int main( int argc_, char** argv_ ) {
 	xmlfsFuse.utime       = nullptr;
 	xmlfsFuse.utimens     = &utimens;
 	xmlfsFuse.write       = &write;
+#ifdef HAVE_FUSE_OPERATIONS_WRITE_BUF
 	xmlfsFuse.write_buf   = &write_buf;
+#endif /* #ifdef HAVE_FUSE_OPERATIONS_WRITE_BUF */
 	return ( fuse_main( argc_, argv_, &xmlfsFuse, nullptr ) );
 }
 

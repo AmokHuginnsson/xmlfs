@@ -39,7 +39,7 @@ void OSetup::test_setup( void ) {
 	M_PROLOG
 	if ( _quiet && _verbose ) {
 		yaal::tools::util::failure( 1,
-				_( "quiet and verbose options are exclusive\n" ) );
+				( "quiet and verbose options are exclusive\n" ) );
 	}
 	if ( _verbose ) {
 		clog.reset( make_pointer<HFile>( stdout, HFile::OWNERSHIP::EXTERNAL ) );
@@ -49,7 +49,7 @@ void OSetup::test_setup( void ) {
 	}
 	if ( _fsFilePath.is_empty() ) {
 		yaal::tools::util::failure( 2,
-				_( "path to file system image not set\n" ) );
+				( "path to file system image not set\n" ) );
 	}
 	return;
 	M_EPILOG
