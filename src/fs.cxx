@@ -905,19 +905,29 @@ public:
 		HLock l( _mutex );
 		HXml::HNodeProxy n( get_node_by_path( path_ ) );
 		HXml::HNode::properties_t& a( n.properties() );
-		if ( time_[0].tv_nsec != UTIME_OMIT ) {
-			if ( time_[0].tv_nsec == UTIME_NOW ) {
-				a[ FILE::PROPERTY::TIME::MODIFICATION ] = now_local().to_string();
-			} else {
-				a[ FILE::PROPERTY::TIME::MODIFICATION ] = HTime( time_[0].tv_sec + HTime::SECONDS_TO_UNIX_EPOCH ).to_string();
+		if ( time_ ) {
+#if defined( HAVE_DECL_UTIME_OMIT ) && defined( HAVE_DECL_UTIME_NOW ) && ( HAVE_DECL_UTIME_OMIT == 1 ) && ( HAVE_DECL_UTIME_NOW == 1 )
+			if ( time_[0].tv_nsec != UTIME_OMIT ) {
+				if ( time_[0].tv_nsec == UTIME_NOW ) {
+					a[ FILE::PROPERTY::TIME::MODIFICATION ] = now_local().to_string();
+				} else {
+					a[ FILE::PROPERTY::TIME::MODIFICATION ] = HTime( time_[0].tv_sec + HTime::SECONDS_TO_UNIX_EPOCH ).to_string();
+				}
 			}
-		}
-		if ( time_[1].tv_nsec != UTIME_OMIT ) {
-			if ( time_[1].tv_nsec == UTIME_NOW ) {
-				a[ FILE::PROPERTY::TIME::ACCESS ] = now_local().to_string();
-			} else {
-				a[ FILE::PROPERTY::TIME::ACCESS ] = HTime( time_[1].tv_sec + HTime::SECONDS_TO_UNIX_EPOCH ).to_string();
+			if ( time_[1].tv_nsec != UTIME_OMIT ) {
+				if ( time_[1].tv_nsec == UTIME_NOW ) {
+					a[ FILE::PROPERTY::TIME::ACCESS ] = now_local().to_string();
+				} else {
+					a[ FILE::PROPERTY::TIME::ACCESS ] = HTime( time_[1].tv_sec + HTime::SECONDS_TO_UNIX_EPOCH ).to_string();
+				}
 			}
+#else
+			a[ FILE::PROPERTY::TIME::MODIFICATION ] = HTime( time_[0].tv_sec + HTime::SECONDS_TO_UNIX_EPOCH ).to_string();
+			a[ FILE::PROPERTY::TIME::ACCESS ] = HTime( time_[1].tv_sec + HTime::SECONDS_TO_UNIX_EPOCH ).to_string();
+#endif
+		} else {
+			a[ FILE::PROPERTY::TIME::MODIFICATION ] = now_local().to_string();
+			a[ FILE::PROPERTY::TIME::ACCESS ] = now_local().to_string();
 		}
 		_synced = false;
 		return;

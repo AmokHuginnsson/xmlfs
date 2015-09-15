@@ -16,4 +16,5 @@ AC_CHECK_MEMBER(fuse_operations.ioctl, AC_DEFINE([HAVE_FUSE_OPERATIONS_IOCTL],[]
 AC_CHECK_MEMBER(fuse_operations.poll, AC_DEFINE([HAVE_FUSE_OPERATIONS_POLL],[],[fuse_operations has poll member.]),[],[#include <fuse.h>])
 AC_CHECK_MEMBER(fuse_conn_info.want, AC_DEFINE([HAVE_FUSE_CONN_INFO_WANT],[],[fuse_conn_info has want member.]),[],[#include <fuse.h>])
 AC_CHECK_MEMBER(fuse_file_info.flock_release, AC_DEFINE([HAVE_FUSE_FILE_INFO_FLOCK_RELEASE],[],[fuse_file_info has flock_release member.]),[],[#include <fuse.h>])
+AC_CHECK_DECLS([UTIME_OMIT, UTIME_NOW],[],[],[#include <fuse.h>])
 YAAL_CONFIGURE_CLIENT_FINALIZE
