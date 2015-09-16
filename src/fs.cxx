@@ -1275,14 +1275,14 @@ public:
 		stat( _image.get_root(), count, size );
 		stat_->f_bsize = BLOCK_SIZE;
 		stat_->f_frsize = underlying.f_frsize;
-		stat_->f_blocks = static_cast<long unsigned>( size ) / stat_->f_bsize;
+		stat_->f_blocks = static_cast<fsblkcnt_t>( size ) / stat_->f_bsize;
 		stat_->f_bfree = stat_->f_blocks * 2;
 		stat_->f_bavail = stat_->f_blocks * 2;
 		stat_->f_files = static_cast<fsfilcnt_t>( count );
 		stat_->f_ffree = static_cast<fsfilcnt_t>( count * 2 );
 		stat_->f_favail = static_cast<fsfilcnt_t>( count * 2 );
 		stat_->f_namemax = underlying.f_namemax;
-		stat_->f_fsid = _devId;
+		stat_->f_fsid = 0xDEADCAFE;
 		return;
 		M_EPILOG
 	}
@@ -1437,12 +1437,12 @@ private:
 		return ( lexical_cast<uid_t>( n_.properties().at( FILE::PROPERTY::USER ) ) );
 		M_EPILOG
 	}
-	uid_t get_group( HXml::HConstNodeProxy const& n_ ) const {
+	gid_t get_group( HXml::HConstNodeProxy const& n_ ) const {
 		M_PROLOG
 		return ( lexical_cast<uid_t>( n_.properties().at( FILE::PROPERTY::GROUP ) ) );
 		M_EPILOG
 	}
-	uid_t get_mode( HXml::HConstNodeProxy const& n_ ) const {
+	mode_t get_mode( HXml::HConstNodeProxy const& n_ ) const {
 		M_PROLOG
 		return ( lexical_cast<mode_t>( n_.properties().at( FILE::PROPERTY::MODE ) ) );
 		M_EPILOG
@@ -1483,9 +1483,9 @@ private:
 		stat_->st_ino = lexical_cast<ino_t>( p.at( FILE::PROPERTY::INODE ) );
 		stat_->st_uid = lexical_cast<uid_t>( p.at( FILE::PROPERTY::USER ) );
 		stat_->st_gid = lexical_cast<uid_t>( p.at( FILE::PROPERTY::GROUP ) );
-		stat_->st_mtim.tv_sec = HTime( p.at( FILE::PROPERTY::TIME::MODIFICATION ) ).raw() - HTime::SECONDS_TO_UNIX_EPOCH;
-		stat_->st_ctim.tv_sec = HTime( p.at( FILE::PROPERTY::TIME::CHANGE ) ).raw() - HTime::SECONDS_TO_UNIX_EPOCH;
-		stat_->st_atim.tv_sec = HTime( p.at( FILE::PROPERTY::TIME::ACCESS ) ).raw() - HTime::SECONDS_TO_UNIX_EPOCH;
+		stat_->st_mtime = HTime( p.at( FILE::PROPERTY::TIME::MODIFICATION ) ).raw() - HTime::SECONDS_TO_UNIX_EPOCH;
+		stat_->st_ctime = HTime( p.at( FILE::PROPERTY::TIME::CHANGE ) ).raw() - HTime::SECONDS_TO_UNIX_EPOCH;
+		stat_->st_atime = HTime( p.at( FILE::PROPERTY::TIME::ACCESS ) ).raw() - HTime::SECONDS_TO_UNIX_EPOCH;
 		stat_->st_mode |= lexical_cast<mode_t>( p.at( FILE::PROPERTY::MODE ) );
 		return;
 		M_EPILOG
