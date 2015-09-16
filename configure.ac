@@ -7,7 +7,7 @@ m4_include([_aux/client-configure.m4])
 YAAL_CONFIGURE_CLIENT_INIT(xmlfs,MY_PACKAGE_VERSION)
 PKG_CHECK_MODULES(FUSE, [fuse >= 2.3])
 AC_CHECK_HEADERS([attr/xattr.h])
-CXXFLAGS="${CXXFLAGS} -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=29"
+CXXFLAGS="${CXXFLAGS} ${FUSE_CFLAGS} -D_FILE_OFFSET_BITS=64 -DFUSE_USE_VERSION=29"
 AC_CHECK_MEMBER(fuse_operations.write_buf, AC_DEFINE([HAVE_FUSE_OPERATIONS_WRITE_BUF],[],[fuse_operations has write_buf member.]),[],[#include <fuse.h>])
 AC_CHECK_MEMBER(fuse_operations.read_buf, AC_DEFINE([HAVE_FUSE_OPERATIONS_READ_BUF],[],[fuse_operations has read_buf member.]),[],[#include <fuse.h>])
 AC_CHECK_MEMBER(fuse_operations.flock, AC_DEFINE([HAVE_FUSE_OPERATIONS_FLOCK],[],[fuse_operations has flock member.]),[],[#include <fuse.h>])

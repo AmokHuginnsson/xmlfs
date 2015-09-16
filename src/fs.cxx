@@ -1847,7 +1847,11 @@ int fsync( char const* path_, int, struct fuse_file_info* info_ ) {
 	return ( ret );
 }
 
-int setxattr( char const* path_, char const* name_, char const* value_, size_t size_, int flags_ ) {
+int setxattr( char const* path_, char const* name_, char const* value_, size_t size_, int flags_
+#ifdef __APPLE__
+	, uint32_t
+#endif
+) {
 	if ( setup._debug ) {
 		log_trace << path_ << endl;
 	}
@@ -1861,7 +1865,11 @@ int setxattr( char const* path_, char const* name_, char const* value_, size_t s
 	return ( ret );
 }
 
-int getxattr( char const* path_, char const* name_, char* buffer_, size_t size_ ) {
+int getxattr( char const* path_, char const* name_, char* buffer_, size_t size_
+#ifdef __APPLE__
+	, uint32_t
+#endif
+) {
 	if ( setup._debug ) {
 		log_trace << path_ << ", for name: " << name_ <<  endl;
 	}
@@ -2123,7 +2131,7 @@ int write_buf( char const* path_, struct fuse_bufvec* src_, off_t offset_, struc
 		ret = _fs_->write_buf( info_->fh, src_, static_cast<int>( offset_ ) );
 		if ( setup._debug ) {
 			log_trace << path_ << ", written: " << ret << endl;
-		}
+	
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
