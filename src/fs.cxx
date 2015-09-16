@@ -2131,7 +2131,7 @@ int write_buf( char const* path_, struct fuse_bufvec* src_, off_t offset_, struc
 		ret = _fs_->write_buf( info_->fh, src_, static_cast<int>( offset_ ) );
 		if ( setup._debug ) {
 			log_trace << path_ << ", written: " << ret << endl;
-	
+		}
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;

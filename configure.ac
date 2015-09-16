@@ -17,4 +17,5 @@ AC_CHECK_MEMBER(fuse_operations.poll, AC_DEFINE([HAVE_FUSE_OPERATIONS_POLL],[],[
 AC_CHECK_MEMBER(fuse_conn_info.want, AC_DEFINE([HAVE_FUSE_CONN_INFO_WANT],[],[fuse_conn_info has want member.]),[],[#include <fuse.h>])
 AC_CHECK_MEMBER(fuse_file_info.flock_release, AC_DEFINE([HAVE_FUSE_FILE_INFO_FLOCK_RELEASE],[],[fuse_file_info has flock_release member.]),[],[#include <fuse.h>])
 AC_CHECK_DECLS([UTIME_OMIT, UTIME_NOW],[],[],[#include <fuse.h>])
+AC_SEARCH_LIBS([intl_gettext],[intl],,[AC_SEARCH_LIBS([gettext],[intl],,[AC_MSG_ERROR([Cannot continue without localization library.])])])
 YAAL_CONFIGURE_CLIENT_FINALIZE

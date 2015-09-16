@@ -50,7 +50,7 @@ include $(DIR_ROOT)/_aux/mk/10_basic.mk
 LIBS           = yaal_hcore$(LIB_INFIX) yaal_tools$(LIB_INFIX) yaal_dbwrapper$(LIB_INFIX) \
 								 yaal_hconsole$(LIB_INFIX) yaal_hdata$(LIB_INFIX) yaal_hconsole$(LIB_INFIX) \
 								 yaal_dbwrapper$(LIB_INFIX) yaal_tools$(LIB_INFIX) yaal_hcore$(LIB_INFIX) \
-                 pthread intl
+                 pthread
 $(eval $(call NEW_TARGET,xmlfs,src,,@RDYNAMIC@))
 DO_@DO_TARGET@=1
 EXEC_NAME    = 1exec
@@ -65,7 +65,7 @@ EXTRA_LIBRARY_PATHS=@EXTRA_LIBRARY_PATHS@
 override EXTRA_CXXFLAGS+=@EXTRA_CXXFLAGS@
 override EXTRA_LXXFLAGS+=@EXTRA_LXXFLAGS@
 override CXXFLAGS += @DEFS@ @FUSE_CFLAGS@
-override LXXFLAGS += @FUSE_LIBS@
+override LXXFLAGS += @FUSE_LIBS@ @LIBS@
 START_GROUP  = @START_GROUP@
 END_GROUP    = @END_GROUP@
 
