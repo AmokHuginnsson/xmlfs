@@ -1273,7 +1273,6 @@ public:
 		int count( 0 );
 		int size( 0 );
 		stat( _image.get_root(), count, size );
-		log( LOG_LEVEL::ALERT ) << "count = " << count << ", size = " << size << endl;
 		stat_->f_bsize = BLOCK_SIZE;
 		stat_->f_frsize = stat_->f_bsize;
 		i64_t mem( system::get_memory_size_info().available() );
