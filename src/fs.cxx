@@ -1273,15 +1273,17 @@ public:
 		int count( 0 );
 		int size( 0 );
 		stat( _image.get_root(), count, size );
+		log( LOG_LEVEL::ALERT ) << "count = " << count << ", size = " << size << endl;
 		stat_->f_bsize = BLOCK_SIZE;
-		stat_->f_frsize = underlying.f_frsize;
-		stat_->f_blocks = static_cast<fsblkcnt_t>( size ) / stat_->f_bsize;
-		stat_->f_bfree = stat_->f_blocks * 2;
-		stat_->f_bavail = stat_->f_blocks * 2;
-		stat_->f_files = static_cast<fsfilcnt_t>( count );
-		stat_->f_ffree = static_cast<fsfilcnt_t>( count * 2 );
-		stat_->f_favail = static_cast<fsfilcnt_t>( count * 2 );
+		stat_->f_frsize = stat_->f_bsize;
+		i64_t mem( system::get_memory_size_info().available() );
+		stat_->f_blocks = static_cast<fsblkcnt_t>( ( mem * 3 ) / 4 ) / stat_->f_bsize;
+		stat_->f_bfree = stat_->f_blocks - ( static_cast<fsblkcnt_t>( size + static_cast<int>( stat_->f_bsize ) - 1 ) / stat_->f_bsize );
+		stat_->f_bavail = stat_->f_bfree;
 		stat_->f_namemax = underlying.f_namemax;
+		stat_->f_files = static_cast<fsfilcnt_t>( mem / ( DIR_SIZE + static_cast<int>( stat_->f_namemax ) ) );
+		stat_->f_ffree = static_cast<fsfilcnt_t>( static_cast<int>( stat_->f_files ) - count );
+		stat_->f_favail = stat_->f_ffree;
 		stat_->f_fsid = 0xDEADCAFE;
 		return;
 		M_EPILOG
@@ -1311,11 +1313,10 @@ private:
 			if ( is_directory( c ) ) {
 				stat( c, count_, size_ );
 				size_ += DIR_SIZE;
+			} else if ( is_plain( c ) ) {
+				size_ += lexical_cast<int>( c.properties().at( FILE::PROPERTY::SIZE ) );
 			}
 			++ count_;
-		}
-		if ( is_plain( node_ ) ) {
-			size_ += lexical_cast<int>( node_.properties().at( FILE::PROPERTY::SIZE ) );
 		}
 		return;
 		M_EPILOG
