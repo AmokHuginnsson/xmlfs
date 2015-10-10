@@ -504,7 +504,7 @@ public:
 			p.insert( make_pair( FILE::PROPERTY::TIME::CHANGE, now.to_string() ) );
 			p.insert( make_pair( FILE::PROPERTY::TIME::ACCESS, now.to_string() ) );
 			HString mode;
-			mode.format( "%04o", get_mode() );
+			mode.format( "%05o", get_mode() );
 			p.insert( make_pair( FILE::PROPERTY::MODE, mode ) );
 			p.insert( make_pair( FILE::PROPERTY::USER, to_string( getuid() ) ) );
 			p.insert( make_pair( FILE::PROPERTY::GROUP, to_string( getgid() ) ) );
@@ -1523,7 +1523,7 @@ private:
 	}
 	void set_mode( HXml::HNodeProxy& node_, mode_t mode_ ) {
 		M_PROLOG
-		node_.properties()[ FILE::PROPERTY::MODE ].format( "%04o", mode_ & 07777 );
+		node_.properties()[ FILE::PROPERTY::MODE ].format( "%05o", mode_ & 07777 );
 		M_EPILOG
 	}
 	handle_t open_handle( HXml::HNodeProxy& node_, int flags_ ) {
