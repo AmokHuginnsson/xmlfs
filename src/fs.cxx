@@ -653,7 +653,7 @@ public:
 		return ( have_access( n, mode_ ) ? 0 : -EACCES );
 		M_EPILOG
 	}
-	void mkdir( tools::filesystem::path_t const& path_, mode_t mode_ ) {
+	void mkdir( tools::filesystem::path_t const& path_, mode_t mode_, uid_t uid_, gid_t gid_ ) {
 		M_PROLOG
 		HLock l( _mutex );
 		path_t bname( basename( path_ ) );
@@ -665,11 +665,11 @@ public:
 		if ( ! have_access( p, W_OK | X_OK ) ) {
 			throw HFileSystemException( "You have no permission to modify parent directory.", -EACCES );
 		}
-		create_node( p, FILE::TYPE::DIRECTORY, bname, mode_ );
+		create_node( p, FILE::TYPE::DIRECTORY, bname, mode_, uid_, gid_ );
 		_synced = false;
 		M_EPILOG
 	}
-	handle_t create( tools::filesystem::path_t const& path_, int flags_, mode_t mode_ ) {
+	handle_t create( tools::filesystem::path_t const& path_, int flags_, mode_t mode_, uid_t uid_, gid_t gid_ ) {
 		path_t bname( basename( path_ ) );
 		path_t dname( dirname( path_ ) );
 		HXml::HNodeProxy p( get_node_by_path( dname ) );
@@ -679,7 +679,7 @@ public:
 		if ( ! have_access( p, W_OK | X_OK ) ) {
 			throw HFileSystemException( "You have no permission to modify parent directory.", -EACCES );
 		}
-		HXml::HNodeProxy n( create_node( p, FILE::TYPE::PLAIN, bname, mode_ ) );
+		HXml::HNodeProxy n( create_node( p, FILE::TYPE::PLAIN, bname, mode_, uid_, gid_ ) );
 		handle_t h( open_handle( n, flags_ ) );
 		_synced = false;
 		return ( h );
@@ -1120,7 +1120,7 @@ public:
 		return;
 		M_EPILOG
 	}
-	void symlink( filesystem::path_t const& target_, filesystem::path_t const& link_ ) {
+	void symlink( filesystem::path_t const& target_, filesystem::path_t const& link_, uid_t uid_, gid_t gid_ ) {
 		M_PROLOG
 		HLock l( _mutex );
 		path_t linkDName( dirname( link_ ) );
@@ -1132,7 +1132,7 @@ public:
 				throw HFileSystemException( "Link path already exists: "_ys.append( link_ ), -EEXIST );
 			}
 		}
-		HXml::HNodeProxy link( create_node( linkBaseDir, FILE::TYPE::SYMLINK, basename( link_ ), get_mode() ) );
+		HXml::HNodeProxy link( create_node( linkBaseDir, FILE::TYPE::SYMLINK, basename( link_ ), get_mode(), uid_, gid_ ) );
 		HXml::HNode::properties_t& a( link.properties() );
 		a[FILE::PROPERTY::TARGET] = target_;
 		_synced = false;
@@ -1204,7 +1204,7 @@ public:
 		return;
 		M_EPILOG
 	}
-	void mknod( char const* path_, mode_t mode_, dev_t dev_ ) {
+	void mknod( char const* path_, mode_t mode_, dev_t dev_, uid_t uid_, gid_t gid_ ) {
 		M_PROLOG
 		HLock l( _mutex );
 		path_t nodeDName( dirname( path_ ) );
@@ -1231,7 +1231,7 @@ public:
 		} else {
 			M_ENSURE( S_ISREG( mode_ ) );
 		}
-		HXml::HNodeProxy node( create_node( nodeBaseDir, *type, basename( path_ ), mode_ ) );
+		HXml::HNodeProxy node( create_node( nodeBaseDir, *type, basename( path_ ), mode_, uid_, gid_ ) );
 		if ( dev ) {
 			HXml::HNode::properties_t& a( node.properties() );
 			a[FILE::PROPERTY::DEV_ID] = dev_;
@@ -1504,7 +1504,7 @@ private:
 		mode_t const fullMode( S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH );
 		return ( fullMode & ~get_umask() );
 	}
-	HXml::HNodeProxy create_node( HXml::HNodeProxy& parent_, yaal::hcore::HString const& type_, yaal::hcore::HString const& name_, mode_t mode_ ) {
+	HXml::HNodeProxy create_node( HXml::HNodeProxy& parent_, yaal::hcore::HString const& type_, yaal::hcore::HString const& name_, mode_t mode_, uid_t uid_, gid_t gid_ ) {
 		M_PROLOG
 		HXml::HNodeProxy n( *parent_.add_node( type_ ) );
 		HXml::HNode::properties_t& a( n.properties() );
@@ -1514,8 +1514,8 @@ private:
 		a.insert( make_pair( FILE::PROPERTY::TIME::CHANGE, now ) );
 		a.insert( make_pair( FILE::PROPERTY::TIME::MODIFICATION, now ) );
 		a.insert( make_pair( FILE::PROPERTY::TIME::ACCESS, now ) );
-		a.insert( make_pair( FILE::PROPERTY::USER, to_string( getuid() ) ) );
-		a.insert( make_pair( FILE::PROPERTY::GROUP, to_string( getgid() ) ) );
+		a.insert( make_pair( FILE::PROPERTY::USER, to_string( uid_ ) ) );
+		a.insert( make_pair( FILE::PROPERTY::GROUP, to_string( gid_ ) ) );
 		a.insert( make_pair( FILE::PROPERTY::INODE, to_string( _inodeGenerator ++ ) ) );
 		set_mode( n, mode_ );
 		return ( n );
@@ -1627,7 +1627,8 @@ int mknod( char const* path_, mode_t mode_, dev_t dev_ ) {
 	}
 	int ret( 0 );
 	try {
-		_fs_->mknod( path_, mode_, dev_ );
+		fuse_context* fc( fuse_get_context() );
+		_fs_->mknod( path_, mode_, dev_, fc->uid, fc->gid );
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
@@ -1641,7 +1642,8 @@ int mkdir( char const* path_, mode_t mode_ ) {
 	}
 	int ret( 0 );
 	try {
-		_fs_->mkdir( path_, mode_ );
+		fuse_context* fc( fuse_get_context() );
+		_fs_->mkdir( path_, mode_, fc->uid, fc->gid );
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
@@ -1683,7 +1685,8 @@ int symlink( char const* target_, char const* link_ ) {
 	}
 	int ret( 0 );
 	try {
-		_fs_->symlink( target_, link_ );
+		fuse_context* fc( fuse_get_context() );
+		_fs_->symlink( target_, link_, fc->uid, fc->gid );
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
@@ -2024,7 +2027,8 @@ int create( char const* path_, mode_t mode_, struct fuse_file_info* info_ ) {
 	}
 	int ret( 0 );
 	try {
-		info_->fh = _fs_->create( path_, info_->flags, mode_ );
+		fuse_context* fc( fuse_get_context() );
+		info_->fh = _fs_->create( path_, info_->flags, mode_, fc->uid, fc->gid );
 	} catch ( HException const& e ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
