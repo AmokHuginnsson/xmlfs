@@ -137,7 +137,7 @@ int handle_program_options( int argc_, char** argv_ ) {
 		.description( "output version information and stop" )
 		.recipient( vers )
 	);
-	po.process_rc_file( "xmlfs", "", set_variables );
+	po.process_rc_file( "", set_variables );
 	int unknown( 0 );
 	int nonOption( po.process_command_line( argc_, argv_, &unknown ) );
 	if ( help || conf || vers || ( unknown > 0 ) ) {
