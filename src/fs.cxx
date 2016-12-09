@@ -532,7 +532,7 @@ public:
 		if ( ! _synced ) {
 			HXml::HNodeProxy n( _image.get_root() );
 			n.properties()[FILE::PROPERTY::INODE_NEXT] = _inodeGenerator.load();
-			_image.save( tools::ensure( make_pointer<HFile>( _imagePath, HFile::OPEN::WRITING | HFile::OPEN::TRUNCATE ) ), true );
+			_image.save( tools::ensure( make_pointer<HFile>( _imagePath, HFile::OPEN::WRITING | HFile::OPEN::TRUNCATE ) ), HXml::GENERATOR::INDENT );
 			_synced = true;
 		}
 		return;
