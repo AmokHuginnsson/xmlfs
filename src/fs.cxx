@@ -44,6 +44,7 @@ Copyright:
 #include <yaal/hcore/hstack.hxx>
 #include <yaal/hcore/htime.hxx>
 #include <yaal/hcore/hthread.hxx>
+#include <yaal/hcore/hformat.hxx>
 #include <yaal/hcore/hlog.hxx>
 #include <yaal/tools/hxml.hxx>
 #include <yaal/tools/filesystem.hxx>
@@ -377,12 +378,17 @@ public:
 			if ( _size > 0 ) {
 				HXml::HNodeProxy value( *content() );
 				HString const& data( value.get_value() );
-				int skipStart( static_cast<int>( data.find_other_than( _whiteSpace_.data() ) ) );
-				int skipEnd( static_cast<int>( data.reverse_find_other_than( _whiteSpace_.data() ) ) );
+				int skipStart( static_cast<int>( data.find_other_than( character_class( CHARACTER_CLASS::WHITESPACE ).data() ) ) );
+				int skipEnd( static_cast<int>( data.reverse_find_other_than( character_class( CHARACTER_CLASS::WHITESPACE ).data() ) ) );
 				int toRead( static_cast<int>( data.get_size() ) - ( skipStart + skipEnd ) );
 //				log_trace << "skipStart = " << skipStart << ", skipEnd = " << skipEnd << ", toRead = " << toRead << endl;
 				if ( toRead > 0 ) {
-					HMemoryObserver srcMem( const_cast<char*>( data.raw() ) + skipStart, toRead );
+					_encoded.realloc( toRead );
+					char* p( _encoded.get<char>() );
+					for ( HString::const_iterator it( data.begin() + skipStart ), end( data.begin() + skipStart + toRead ); it != end; ++ it, ++ p ) {
+						*p = static_cast<char>( (*it).get() );
+					}
+					HMemoryObserver srcMem( _encoded.raw(), toRead );
 					HMemoryProvider dstMem( _data, 0 );
 					HMemory src( srcMem );
 					HMemory dst( dstMem );
@@ -503,8 +509,7 @@ public:
 			p.insert( make_pair( FILE::PROPERTY::TIME::MODIFICATION, now.to_string() ) );
 			p.insert( make_pair( FILE::PROPERTY::TIME::CHANGE, now.to_string() ) );
 			p.insert( make_pair( FILE::PROPERTY::TIME::ACCESS, now.to_string() ) );
-			HString mode;
-			mode.format( "%05o", get_mode() );
+			HString mode( format( "%05o", static_cast<int>( get_mode() ) ) );
 			p.insert( make_pair( FILE::PROPERTY::MODE, mode ) );
 			p.insert( make_pair( FILE::PROPERTY::USER, to_string( getuid() ) ) );
 			p.insert( make_pair( FILE::PROPERTY::GROUP, to_string( getgid() ) ) );
@@ -634,11 +639,13 @@ public:
 		get_stat( n, &s );
 		filler_( buf_, ".", &s, 0 );
 		filler_( buf_, "..", NULL, 0 );
+		HUTF8String utf8;
 		for ( HXml::HConstNodeProxy const& c : n ) {
 			if ( c.get_name() != FILE::CONTENT::XATTR ) {
 				HString const& name( c.properties().at( FILE::PROPERTY::NAME ) );
 				get_stat( c, &s );
-				if ( filler_( buf_, name.c_str(), &s, 0 ) ) {
+				utf8.assign( name );
+				if ( filler_( buf_, utf8.c_str(), &s, 0 ) ) {
 					throw HFileSystemException( "Directory buffer is full." );
 				}
 			}
@@ -688,7 +695,7 @@ public:
 		M_PROLOG
 		HLock l( _mutex );
 		HXml::HConstNodeProxy n( get_node_by_path( path_ ) );
-		int pos( static_cast<int>( name_.find( '.' ) ) );
+		int pos( static_cast<int>( name_.find( '.'_ycp ) ) );
 		if ( pos == HString::npos ) {
 			throw HFileSystemException( "Invalid attribute name: "_ys.append( name_ ), -EINVAL );
 		}
@@ -724,8 +731,8 @@ public:
 		}
 		int ret( 0 );
 		if ( ok ) {
-			HString value( base64::decode( (*n.begin()).get_value() ) );
-			ret = static_cast<int>( value.get_size() );
+			HUTF8String value( base64::decode( (*n.begin()).get_value() ) );
+			ret = static_cast<int>( value.byte_count() );
 			if ( ret <= static_cast<int>( size_ ) ) {
 				::memcpy( buffer_, value.c_str(), static_cast<int unsigned>( ret ) );
 			} else if ( static_cast<int>( size_ ) > 0 ) {
@@ -741,7 +748,7 @@ public:
 		M_PROLOG
 		HLock l( _mutex );
 		HXml::HNodeProxy n( get_node_by_path( path_ ) );
-		int pos( static_cast<int>( name_.find( '.' ) ) );
+		int pos( static_cast<int>( name_.find( '.'_ycp ) ) );
 		if ( pos == HString::npos ) {
 			throw HFileSystemException( "Invalid attribute name: "_ys.append( name_ ), -EINVAL );
 		}
@@ -787,7 +794,7 @@ public:
 		if ( ! ok ) {
 			n = *n.add_node( name );
 			n = *n.add_node( HXml::HNode::TYPE::CONTENT );
-		} else if ( n.has_childs() ) {
+		} else if ( n.has_children() ) {
 			n = *n.begin();
 		} else {
 			n = *n.add_node( HXml::HNode::TYPE::CONTENT );
@@ -802,7 +809,7 @@ public:
 		M_PROLOG
 		HLock l( _mutex );
 		HXml::HNodeProxy node( get_node_by_path( path_ ) );
-		int pos( static_cast<int>( name_.find( '.' ) ) );
+		int pos( static_cast<int>( name_.find( '.'_ycp ) ) );
 		if ( pos == HString::npos ) {
 			throw HFileSystemException( "Invalid attribute name: "_ys.append( name_ ), -EINVAL );
 		}
@@ -835,10 +842,10 @@ public:
 			if ( (*it).get_name() == name ) {
 				ok = true;
 				(*nsIt).remove_node( it );
-				if ( ! (*nsIt).has_childs() ) {
+				if ( ! (*nsIt).has_children() ) {
 					(*nodeIt).remove_node( nsIt );
 				}
-				if ( ! (*nodeIt).has_childs() ) {
+				if ( ! (*nodeIt).has_children() ) {
 					node.remove_node( nodeIt );
 				}
 				break;
@@ -865,9 +872,11 @@ public:
 		}
 		int size( 0 );
 		if ( ok ) {
+			HUTF8String nsn;
+			HUTF8String an;
 			for ( HXml::HConstNodeProxy ns : n ) {
-				HString const& nsn( ns.get_name() );
-				int nss( static_cast<int>( nsn.get_size() ) );
+				nsn.assign( ns.get_name() );
+				int nss( static_cast<int>( nsn.byte_count() ) );
 				for ( HXml::HConstNodeProxy attr : ns ) {
 					if ( size_ > 0 ) {
 						if ( ( size + nss + 1 ) > size_ ) {
@@ -881,8 +890,8 @@ public:
 					}
 					++ size;
 
-					HString const& an( attr.get_name() );
-					int as( static_cast<int>( an.get_size() ) );
+					an.assign( attr.get_name() );
+					int as( static_cast<int>( an.byte_count() ) );
 					if ( size_ > 0 ) {
 						if ( ( size + as + 1 ) > size_ ) {
 							throw HFileSystemException( "Buffer too small.", -ERANGE );
@@ -1149,11 +1158,11 @@ public:
 		if ( ! is_symlink( link ) ) {
 			throw HFileSystemException( "Not a symlink:"_ys.append( path_ ), -EINVAL );
 		}
-		HString const& target( link.properties().at( FILE::PROPERTY::TARGET ) );
-		int len( min( static_cast<int>( target.get_length() ), size_ - 1 ) );
-		::strncpy( buffer_, target.raw(), static_cast<size_t>( len ) );
+		HUTF8String target( link.properties().at( FILE::PROPERTY::TARGET ) );
+		int len( min( static_cast<int>( target.byte_count() ), size_ - 1 ) );
+		::strncpy( buffer_, target.c_str(), static_cast<size_t>( len ) );
 		buffer_[len] = 0;
-		if ( len < target.get_length() ) {
+		if ( len < target.byte_count() ) {
 			throw HFileSystemException( "", -ENAMETOOLONG );
 		}
 		return;
@@ -1268,7 +1277,8 @@ public:
 		HLock l( _mutex );
 		struct statvfs underlying;
 		::memset( &underlying, 0, sizeof ( underlying ) );
-		::statvfs( _imagePath.raw(), &underlying );
+		HUTF8String utf8( _imagePath );
+		::statvfs( utf8.c_str(), &underlying );
 		::memset( stat_, 0, sizeof ( *stat_ ) );
 		int count( 0 );
 		int size( 0 );
@@ -1523,7 +1533,7 @@ private:
 	}
 	void set_mode( HXml::HNodeProxy& node_, mode_t mode_ ) {
 		M_PROLOG
-		node_.properties()[ FILE::PROPERTY::MODE ].format( "%05o", mode_ & 07777 );
+		node_.properties()[ FILE::PROPERTY::MODE ] = format( "%05o", static_cast<int>( mode_ & 07777 ) );
 		M_EPILOG
 	}
 	handle_t open_handle( HXml::HNodeProxy& node_, int flags_ ) {
