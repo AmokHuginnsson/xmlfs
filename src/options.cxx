@@ -68,7 +68,8 @@ void version( void ) {
 int handle_program_options( int argc_, char** argv_ ) {
 	M_PROLOG
 	HProgramOptionsHandler po;
-	OOptionInfo info( po, setup._programName, "XML based file system in user space", NULL );
+	HOptionInfo info( po );
+	info.name( setup._programName ).intro( "XML based file system in user space" );
 	bool help( false );
 	bool conf( false );
 	bool vers( false );
