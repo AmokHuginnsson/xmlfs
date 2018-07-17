@@ -378,8 +378,8 @@ public:
 			if ( _size > 0 ) {
 				HXml::HNodeProxy value( *content() );
 				HString const& data( value.get_value() );
-				int skipStart( static_cast<int>( data.find_other_than( character_class( CHARACTER_CLASS::WHITESPACE ).data() ) ) );
-				int skipEnd( static_cast<int>( data.reverse_find_other_than( character_class( CHARACTER_CLASS::WHITESPACE ).data() ) ) );
+				int skipStart( static_cast<int>( data.find_other_than( character_class<CHARACTER_CLASS::WHITESPACE>().data() ) ) );
+				int skipEnd( static_cast<int>( data.reverse_find_other_than( character_class<CHARACTER_CLASS::WHITESPACE>().data() ) ) );
 				int toRead( static_cast<int>( data.get_size() ) - ( skipStart + skipEnd ) );
 //				log_trace << "skipStart = " << skipStart << ", skipEnd = " << skipEnd << ", toRead = " << toRead << endl;
 				if ( toRead > 0 ) {
