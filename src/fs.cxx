@@ -701,7 +701,7 @@ public:
 		}
 		bool ok( false );
 		for ( HXml::HConstNodeProxy c : n ) {
-			if ( ( c.get_type() == HXml::HNode::TYPE::NODE ) && ( c.get_name() == FILE::CONTENT::XATTR ) ) {
+			if ( ( c.get_type() == HXml::HNode::TYPE::ELEMENT ) && ( c.get_name() == FILE::CONTENT::XATTR ) ) {
 				n = c;
 				ok = true;
 				break;
@@ -754,7 +754,7 @@ public:
 		}
 		bool ok( false );
 		for ( HXml::HNodeProxy c : n ) {
-			if ( ( c.get_type() == HXml::HNode::TYPE::NODE ) && ( c.get_name() == FILE::CONTENT::XATTR ) ) {
+			if ( ( c.get_type() == HXml::HNode::TYPE::ELEMENT ) && ( c.get_name() == FILE::CONTENT::XATTR ) ) {
 				n = c;
 				ok = true;
 				break;
@@ -816,7 +816,7 @@ public:
 		bool ok( false );
 		HXml::HIterator nodeIt( node.begin() );
 		for ( HXml::HIterator end( node.end() ); nodeIt != end; ++ nodeIt ) {
-			if ( ( (*nodeIt).get_type() == HXml::HNode::TYPE::NODE ) && ( (*nodeIt).get_name() == FILE::CONTENT::XATTR ) ) {
+			if ( ( (*nodeIt).get_type() == HXml::HNode::TYPE::ELEMENT ) && ( (*nodeIt).get_name() == FILE::CONTENT::XATTR ) ) {
 				ok = true;
 				break;
 			}
@@ -864,7 +864,7 @@ public:
 		HXml::HConstNodeProxy n( get_node_by_path( path_ ) );
 		bool ok( false );
 		for ( HXml::HConstNodeProxy c : n ) {
-			if ( ( c.get_type() == HXml::HNode::TYPE::NODE ) && ( c.get_name() == FILE::CONTENT::XATTR ) ) {
+			if ( ( c.get_type() == HXml::HNode::TYPE::ELEMENT ) && ( c.get_name() == FILE::CONTENT::XATTR ) ) {
 				n = c;
 				ok = true;
 				break;
@@ -1401,7 +1401,7 @@ private:
 			}
 			bool found( false );
 			for ( HXml::HIterator it( n.begin() ), end( n.end() ); it != end; ++ it ) {
-				if ( (*it).get_type() != HXml::HNode::TYPE::NODE ) {
+				if ( (*it).get_type() != HXml::HNode::TYPE::ELEMENT ) {
 					continue;
 				}
 				HXml::HNode::properties_t::const_iterator p( (*it).properties().find( FILE::PROPERTY::NAME ) );
