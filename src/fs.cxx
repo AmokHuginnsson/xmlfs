@@ -152,10 +152,10 @@ public:
 					}
 				}
 				if ( _size > 0 ) {
-					HMemoryObserver srcMem( _data.raw(), _size );
-					HMemoryProvider dstMem( _encoded, 0 );
-					HMemory src( srcMem );
-					HMemory dst( dstMem );
+					HMemory src( make_resource<HMemoryObserver>( _data.raw(), _size ) );
+					HResource<HMemoryProvider> mor( make_resource<HMemoryProvider>( _encoded, 0 ) );
+					HMemoryProvider& dstMem( *mor.raw() );
+					HMemory dst( yaal::move( mor ) );
 					base64::encode( src, dst );
 					HString data( static_cast<char*>( dstMem.get_memory() ), dstMem.get_size() );
 					value.set_value( data );
@@ -388,10 +388,10 @@ public:
 					for ( HString::const_iterator it( data.begin() + skipStart ), end( data.begin() + skipStart + toRead ); it != end; ++ it, ++ p ) {
 						*p = static_cast<char>( (*it).get() );
 					}
-					HMemoryObserver srcMem( _encoded.raw(), toRead );
-					HMemoryProvider dstMem( _data, 0 );
-					HMemory src( srcMem );
-					HMemory dst( dstMem );
+					HMemory src( make_resource<HMemoryObserver>( _encoded.raw(), toRead ) );
+					HResource<HMemoryProvider> mor( make_resource<HMemoryProvider>( _data, 0 ) );
+					HMemoryProvider& dstMem( *mor.raw() );
+					HMemory dst( yaal::move( mor ) );
 					base64::decode( src, dst );
 					int decodedSize( static_cast<int>( dstMem.get_size() ) );
 					if ( decodedSize == _size ) {
