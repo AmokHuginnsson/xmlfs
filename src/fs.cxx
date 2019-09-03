@@ -638,7 +638,7 @@ public:
 		struct stat s;
 		get_stat( n, &s );
 		filler_( buf_, ".", &s, 0 );
-		filler_( buf_, "..", NULL, 0 );
+		filler_( buf_, "..", nullptr, 0 );
 		HUTF8String utf8;
 		for ( HXml::HConstNodeProxy const& c : n ) {
 			if ( c.get_name() != FILE::CONTENT::XATTR ) {

@@ -43,8 +43,13 @@ struct OSetup {
 	yaal::hcore::HString _logPath;
 	/* self-sufficient */
 	OSetup( void )
-		: _fsFilePath(), _quiet( false ), _verbose( false ), _debug( false ),
-		_programName( NULL ), _logPath() {}
+		: _fsFilePath()
+		, _quiet( false )
+		, _verbose( false )
+		, _debug( false )
+		, _programName( NULL )
+		, _logPath() {
+	}
 	void test_setup( void );
 private:
 	OSetup( OSetup const& );
