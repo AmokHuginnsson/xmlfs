@@ -42,10 +42,10 @@ void OSetup::test_setup( void ) {
 				( "quiet and verbose options are exclusive\n" ) );
 	}
 	if ( _verbose ) {
-		clog.reset( make_pointer<HFile>( stdout, HFile::OWNERSHIP::EXTERNAL ) );
+		clog.reset_owned( make_pointer<HFile>( stdout, HFile::OWNERSHIP::EXTERNAL ) );
 	}
 	if ( _quiet ) {
-		cout.reset();
+		cout.reset_owned();
 	}
 	if ( _fsFilePath.is_empty() ) {
 		yaal::tools::util::failure( 2,

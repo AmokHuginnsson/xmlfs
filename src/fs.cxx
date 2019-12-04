@@ -920,19 +920,19 @@ public:
 				if ( time_[0].tv_nsec == UTIME_NOW ) {
 					a[ FILE::PROPERTY::TIME::MODIFICATION ] = now_local().to_string();
 				} else {
-					a[ FILE::PROPERTY::TIME::MODIFICATION ] = HTime( time_[0].tv_sec + HTime::SECONDS_TO_UNIX_EPOCH ).to_string();
+					a[ FILE::PROPERTY::TIME::MODIFICATION ] = HTime( unix_epoch_to_yaal_epoch( time_[0].tv_sec ) ).to_string();
 				}
 			}
 			if ( time_[1].tv_nsec != UTIME_OMIT ) {
 				if ( time_[1].tv_nsec == UTIME_NOW ) {
 					a[ FILE::PROPERTY::TIME::ACCESS ] = now_local().to_string();
 				} else {
-					a[ FILE::PROPERTY::TIME::ACCESS ] = HTime( time_[1].tv_sec + HTime::SECONDS_TO_UNIX_EPOCH ).to_string();
+					a[ FILE::PROPERTY::TIME::ACCESS ] = HTime( unix_epoch_to_yaal_epoch( time_[1].tv_sec ) ).to_string();
 				}
 			}
 #else
-			a[ FILE::PROPERTY::TIME::MODIFICATION ] = HTime( time_[0].tv_sec + HTime::SECONDS_TO_UNIX_EPOCH ).to_string();
-			a[ FILE::PROPERTY::TIME::ACCESS ] = HTime( time_[1].tv_sec + HTime::SECONDS_TO_UNIX_EPOCH ).to_string();
+			a[ FILE::PROPERTY::TIME::MODIFICATION ] = HTime( unix_epoch_to_yaal_epoch( time_[0].tv_sec ) ).to_string();
+			a[ FILE::PROPERTY::TIME::ACCESS ] = HTime( unix_epoch_to_yaal_epoch( time_[1].tv_sec ) ).to_string();
 #endif
 		} else {
 			a[ FILE::PROPERTY::TIME::MODIFICATION ] = now_local().to_string();
@@ -1493,9 +1493,9 @@ private:
 		stat_->st_ino = lexical_cast<ino_t>( p.at( FILE::PROPERTY::INODE ) );
 		stat_->st_uid = lexical_cast<uid_t>( p.at( FILE::PROPERTY::USER ) );
 		stat_->st_gid = lexical_cast<uid_t>( p.at( FILE::PROPERTY::GROUP ) );
-		stat_->st_mtime = HTime( p.at( FILE::PROPERTY::TIME::MODIFICATION ) ).raw() - HTime::SECONDS_TO_UNIX_EPOCH;
-		stat_->st_ctime = HTime( p.at( FILE::PROPERTY::TIME::CHANGE ) ).raw() - HTime::SECONDS_TO_UNIX_EPOCH;
-		stat_->st_atime = HTime( p.at( FILE::PROPERTY::TIME::ACCESS ) ).raw() - HTime::SECONDS_TO_UNIX_EPOCH;
+		stat_->st_mtime = yaal_epoch_to_unix_epoch( HTime( p.at( FILE::PROPERTY::TIME::MODIFICATION ) ).raw() );
+		stat_->st_ctime = yaal_epoch_to_unix_epoch( HTime( p.at( FILE::PROPERTY::TIME::CHANGE ) ).raw() );
+		stat_->st_atime = yaal_epoch_to_unix_epoch( HTime( p.at( FILE::PROPERTY::TIME::ACCESS ) ).raw() );
 		stat_->st_mode |= lexical_cast<mode_t>( p.at( FILE::PROPERTY::MODE ) );
 		return;
 		M_EPILOG
