@@ -45,6 +45,7 @@ Copyright:
 #include <yaal/hcore/htime.hxx>
 #include <yaal/hcore/hthread.hxx>
 #include <yaal/hcore/hformat.hxx>
+#include <yaal/hcore/system.hxx>
 #include <yaal/hcore/hlog.hxx>
 #include <yaal/tools/hxml.hxx>
 #include <yaal/tools/filesystem.hxx>
