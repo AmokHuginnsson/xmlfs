@@ -75,7 +75,7 @@ int handle_program_options( int argc_, char** argv_ ) {
 	bool vers( false );
 	po(
 		HProgramOptionsHandler::HOption()
-		.long_form( "log_path" )
+		.long_form( "log-path" )
 		.switch_type( HProgramOptionsHandler::HOption::ARGUMENT::REQUIRED )
 		.description( "path pointing to file for application logs" )
 		.recipient(	setup._logPath )
