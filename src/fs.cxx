@@ -291,7 +291,7 @@ public:
 			int written( static_cast<int>( fuse_buf_copy( &dst, const_cast<fuse_bufvec*>( buf_ ), FUSE_BUF_NO_SPLICE ) ) );
 			_size = newSize;
 			_state = STATE::DIRTY;
-			return ( written );
+			return written;
 			M_EPILOG
 		}
 #endif /* #ifdef HAVE_FUSE_OPERATIONS_WRITE_BUF */
@@ -344,7 +344,7 @@ public:
 				(*dst_)->count = 1;
 				::memcpy( (*dst_)->buf[0].mem, _data.get<char const>() + offset_, static_cast<size_t>( toRead ) );
 			}
-			return ( toRead );
+			return toRead;
 			M_EPILOG
 		}
 #endif /* #ifdef HAVE_FUSE_OPERATIONS_READ_BUF */
@@ -366,7 +366,7 @@ public:
 			}
 			int toRead( min( max( _size - offset_, 0 ), size_ ) );
 			::memcpy( buffer_, _data.get<char const>() + offset_, static_cast<size_t>( toRead ) );
-			return ( toRead );
+			return toRead;
 			M_EPILOG
 		}
 		bool is_flushed( void ) const {
@@ -421,7 +421,7 @@ public:
 				}
 				++ it;
 			}
-			return ( it );
+			return it;
 			M_EPILOG
 		}
 		HDescriptor( HDescriptor const& ) = delete;
@@ -556,7 +556,7 @@ public:
 		_inodes.insert( make_pair( h, inode ) );
 		descriptors_t::iterator descIt( _descriptors.insert( descriptors_t::value_type( inode, HDescriptor( n, HDescriptor::OPEN_MODE::READING ) ) ).first );
 		descIt->second.inc_open_count();
-		return ( h );
+		return h;
 		M_EPILOG
 	}
 	void releasedir(
@@ -584,7 +584,7 @@ public:
 		}
 		handle_t h( open_handle( n, flags_ ) );
 		_synced = false;
-		return ( h );
+		return h;
 		M_EPILOG
 	}
 	void release(
@@ -690,7 +690,7 @@ public:
 		HXml::HNodeProxy n( create_node( p, FILE::TYPE::PLAIN, bname, mode_, uid_, gid_ ) );
 		handle_t h( open_handle( n, flags_ ) );
 		_synced = false;
-		return ( h );
+		return h;
 	}
 	int getxattr( char const* path_, HString const& name_, char* buffer_, size_t size_ ) const {
 		M_PROLOG
@@ -742,7 +742,7 @@ public:
 		} else {
 			ret = -ENODATA;
 		}
-		return ( ret );
+		return ret;
 		M_EPILOG
 	}
 	void setxattr( char const* path_, HString const& name_, char const* buffer_, int size_, int flags_ ) {
@@ -907,7 +907,7 @@ public:
 				}
 			}
 		}
-		return ( size );
+		return size;
 		M_EPILOG
 	}
 	void utimens( char const* path_, struct timespec const time_[2] ) {
@@ -1007,7 +1007,7 @@ public:
 		HLock l( _mutex );
 		int ret( descriptor( handle_ ).write_buf( buf_, offset_ ) );
 		_synced = false;
-		return ( ret );
+		return ret;
 		M_EPILOG
 	}
 #endif /* #ifdef HAVE_FUSE_OPERATIONS_WRITE_BUF */
@@ -1016,7 +1016,7 @@ public:
 		HLock l( _mutex );
 		int ret( descriptor( handle_ ).write( buf_, size_, offset_ ) );
 		_synced = false;
-		return ( ret );
+		return ret;
 		M_EPILOG
 	}
 #ifdef HAVE_FUSE_OPERATIONS_READ_BUF
@@ -1024,7 +1024,7 @@ public:
 		M_PROLOG
 		HLock l( _mutex );
 		int ret( descriptor( handle_ ).read_buf( buf_, size_, offset_ ) );
-		return ( ret );
+		return ret;
 		M_EPILOG
 	}
 #endif /* #ifdef HAVE_FUSE_OPERATIONS_READ_BUF */
@@ -1032,7 +1032,7 @@ public:
 		M_PROLOG
 		HLock l( _mutex );
 		int ret( descriptor( handle_ ).read( buf_, size_, offset_ ) );
-		return ( ret );
+		return ret;
 		M_EPILOG
 	}
 	void chmod( char const* path_, mode_t mode_ ) {
@@ -1309,7 +1309,7 @@ private:
 			h = _availableDescriptors.top();
 			_availableDescriptors.pop();
 		}
-		return ( h );
+		return h;
 	}
 	void release_handle( handle_t handle_ ) {
 		M_PROLOG
@@ -1384,7 +1384,7 @@ private:
 			}
 			ok = true;
 		} while ( false );
-		return ( ok );
+		return ok;
 	}
 	HXml::HIterator get_node_it_by_path( tools::filesystem::path_t const& path_ ) {
 		M_PROLOG
@@ -1418,7 +1418,7 @@ private:
 				throw HFileSystemException( "No such file or directory: "_ys.append( path_ ), -ENOENT );
 			}
 		}
-		return ( nodeIt );
+		return nodeIt;
 		M_EPILOG
 	}
 	HXml::HNodeProxy get_node_by_path( tools::filesystem::path_t const& path_ ) {
@@ -1436,7 +1436,7 @@ private:
 				++ hlc;
 			}
 		}
-		return ( hlc );
+		return hlc;
 	}
 	u64_t get_inode( HXml::HConstNodeProxy const& n_ ) const {
 		M_PROLOG
@@ -1509,7 +1509,7 @@ private:
 			log( LOG_LEVEL::ERROR ) << SYSCALL_FAILURE << endl;
 			exit( 1 );
 		}
-		return ( curUmask );
+		return curUmask;
 	}
 	mode_t get_mode( void ) const {
 		mode_t const fullMode( S_IRUSR | S_IWUSR | S_IXUSR | S_IRGRP | S_IWGRP | S_IXGRP | S_IROTH | S_IWOTH | S_IXOTH );
@@ -1529,7 +1529,7 @@ private:
 		a.insert( make_pair( FILE::PROPERTY::GROUP, to_string( gid_ ) ) );
 		a.insert( make_pair( FILE::PROPERTY::INODE, to_string( _inodeGenerator ++ ) ) );
 		set_mode( n, mode_ );
-		return ( n );
+		return n;
 		M_EPILOG
 	}
 	void set_mode( HXml::HNodeProxy& node_, mode_t mode_ ) {
@@ -1550,7 +1550,7 @@ private:
 		_inodes.insert( make_pair( h, inode ) );
 		descriptors_t::iterator descIt( _descriptors.insert( descriptors_t::value_type( inode, HDescriptor( node_, mode ) ) ).first );
 		descIt->second.inc_open_count();
-		return ( h );
+		return h;
 		M_EPILOG
 	}
 	static bool is_plain( HXml::HConstNodeProxy const& node_ ) {
@@ -1601,7 +1601,7 @@ int getattr( char const* path_, struct stat* stat_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int readlink( char const* path_, char* buffer_, size_t size_ ) {
@@ -1615,7 +1615,7 @@ int readlink( char const* path_, char* buffer_, size_t size_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int open( char const* path_, struct fuse_file_info* info_ ) {
@@ -1629,7 +1629,7 @@ int open( char const* path_, struct fuse_file_info* info_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int mknod( char const* path_, mode_t mode_, dev_t dev_ ) {
@@ -1644,7 +1644,7 @@ int mknod( char const* path_, mode_t mode_, dev_t dev_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int mkdir( char const* path_, mode_t mode_ ) {
@@ -1659,7 +1659,7 @@ int mkdir( char const* path_, mode_t mode_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int unlink( char const* path_ ) {
@@ -1673,7 +1673,7 @@ int unlink( char const* path_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int rmdir( char const* path_ ) {
@@ -1687,7 +1687,7 @@ int rmdir( char const* path_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int symlink( char const* target_, char const* link_ ) {
@@ -1702,7 +1702,7 @@ int symlink( char const* target_, char const* link_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int rename( char const* from_, char const* to_ ) {
@@ -1716,7 +1716,7 @@ int rename( char const* from_, char const* to_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int link( char const* link_, char const* target_ ) {
@@ -1735,7 +1735,7 @@ int chmod( char const* path_, mode_t mode_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int chown( char const* path_, uid_t uid_, gid_t gid_ ) {
@@ -1749,7 +1749,7 @@ int chown( char const* path_, uid_t uid_, gid_t gid_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int truncate( char const* path_, off_t size_ ) {
@@ -1763,7 +1763,7 @@ int truncate( char const* path_, off_t size_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int read( char const* path_, char* buffer_, size_t size_, off_t offset_,
@@ -1781,7 +1781,7 @@ int read( char const* path_, char* buffer_, size_t size_, off_t offset_,
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int write( char const* path_, char const* buffer_, size_t size_, off_t offset_, struct fuse_file_info* info_ ) {
@@ -1798,7 +1798,7 @@ int write( char const* path_, char const* buffer_, size_t size_, off_t offset_, 
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int statfs( char const* path_, struct statvfs* stat_ ) {
@@ -1812,7 +1812,7 @@ int statfs( char const* path_, struct statvfs* stat_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int flush( char const* path_, struct fuse_file_info* info_ ) {
@@ -1826,7 +1826,7 @@ int flush( char const* path_, struct fuse_file_info* info_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int release( char const* path_, struct fuse_file_info* info_ ) {
@@ -1844,7 +1844,7 @@ int release( char const* path_, struct fuse_file_info* info_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int fsync( char const* path_, int, struct fuse_file_info* info_ ) {
@@ -1858,7 +1858,7 @@ int fsync( char const* path_, int, struct fuse_file_info* info_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int setxattr( char const* path_, char const* name_, char const* value_, size_t size_, int flags_
@@ -1876,7 +1876,7 @@ int setxattr( char const* path_, char const* name_, char const* value_, size_t s
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int getxattr( char const* path_, char const* name_, char* buffer_, size_t size_
@@ -1894,7 +1894,7 @@ int getxattr( char const* path_, char const* name_, char* buffer_, size_t size_
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int listxattr( char const* path_, char* buffer_, size_t size_ ) {
@@ -1908,7 +1908,7 @@ int listxattr( char const* path_, char* buffer_, size_t size_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int removexattr( char const* path_, char const* name_ ) {
@@ -1922,7 +1922,7 @@ int removexattr( char const* path_, char const* name_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int opendir( char const* path_, struct fuse_file_info* info_ ) {
@@ -1936,7 +1936,7 @@ int opendir( char const* path_, struct fuse_file_info* info_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int readdir( char const* path_, void* buffer_, fuse_fill_dir_t filler_,
@@ -1951,7 +1951,7 @@ int readdir( char const* path_, void* buffer_, fuse_fill_dir_t filler_,
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int releasedir( char const* path_, struct fuse_file_info* info_ ) {
@@ -1969,7 +1969,7 @@ int releasedir( char const* path_, struct fuse_file_info* info_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int fsyncdir( char const* path_, int, struct fuse_file_info* info_ ) {
@@ -1983,7 +1983,7 @@ int fsyncdir( char const* path_, int, struct fuse_file_info* info_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 void* init( struct fuse_conn_info* info_ ) {
@@ -2001,7 +2001,7 @@ void* init( struct fuse_conn_info* info_ ) {
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 		exit( 1 );
 	}
-	return ( nullptr );
+	return nullptr;
 }
 
 void destroy( void * ) {
@@ -2029,7 +2029,7 @@ int access( char const* path_, int mode_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int create( char const* path_, mode_t mode_, struct fuse_file_info* info_ ) {
@@ -2044,7 +2044,7 @@ int create( char const* path_, mode_t mode_, struct fuse_file_info* info_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int ftruncate( char const* path_, off_t size_, struct fuse_file_info* info_ ) {
@@ -2058,7 +2058,7 @@ int ftruncate( char const* path_, off_t size_, struct fuse_file_info* info_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int fgetattr( char const* path_, struct stat* stat_, struct fuse_file_info* info_ ) {
@@ -2072,7 +2072,7 @@ int fgetattr( char const* path_, struct stat* stat_, struct fuse_file_info* info
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int lock( char const* path_, struct fuse_file_info* info_, int cmd_, struct flock* lock_ ) {
@@ -2086,7 +2086,7 @@ int lock( char const* path_, struct fuse_file_info* info_, int cmd_, struct floc
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int utimens( char const* path_, struct timespec const time_[2] ) {
@@ -2100,7 +2100,7 @@ int utimens( char const* path_, struct timespec const time_[2] ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 
 int bmap( char const* path_, size_t, uint64_t* ) {
@@ -2131,7 +2131,7 @@ int poll( char const* path_, struct fuse_file_info* info_, struct fuse_pollhandl
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 #endif /* #ifdef HAVE_FUSE_OPERATIONS_POLL */
 
@@ -2151,7 +2151,7 @@ int write_buf( char const* path_, struct fuse_bufvec* src_, off_t offset_, struc
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 #endif /* #ifdef HAVE_FUSE_OPERATIONS_WRITE_BUF */
 
@@ -2170,7 +2170,7 @@ int read_buf( char const* path_, struct fuse_bufvec** dst_, size_t size_, off_t 
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 #endif /* #ifdef HAVE_FUSE_OPERATIONS_READ_BUF */
 
@@ -2186,7 +2186,7 @@ int flock( char const* path_, struct fuse_file_info* info_, int lock_ ) {
 		ret = e.code();
 		log( LOG_LEVEL::ERROR ) << e.what() << ", " << -e.code() << endl;
 	}
-	return ( ret );
+	return ret;
 }
 #endif /* #ifdef HAVE_FUSE_OPERATIONS_FLOCK */
 

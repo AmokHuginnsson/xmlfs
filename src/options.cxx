@@ -152,7 +152,7 @@ int handle_program_options( int argc_, char** argv_ ) {
 		HLog::disable_auto_rehash();
 		throw unknown;
 	}
-	return ( nonOption );
+	return nonOption;
 	M_EPILOG
 }
 

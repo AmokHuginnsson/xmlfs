@@ -72,7 +72,7 @@ int main( int argc_, char* argv_[] ) {
 	} catch ( int e ) {
 		err = e;
 	}
-	return ( err );
+	return err;
 	M_FINAL
 }
 
