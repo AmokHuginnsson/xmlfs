@@ -790,7 +790,7 @@ public:
 		if ( ok && ( flags_ == XATTR_CREATE ) ) {
 			throw HFileSystemException( "ExAttr already exists: "_ys.append( name ), -EEXIST );
 		} else if ( ! ok && ( flags_ == XATTR_REPLACE ) ) {
-			throw HFileSystemException( "ExAttr does not exist: "_ys.append( name ), -ENOATTR );
+			throw HFileSystemException( "ExAttr does not exist: "_ys.append( name ), -ENODATA );
 		}
 		if ( ! ok ) {
 			n = *n.add_node( name );
@@ -823,7 +823,7 @@ public:
 			}
 		}
 		if ( ! ok ) {
-			throw HFileSystemException( "Attribute does not exist: "_ys.append( name_ ), -ENOATTR );
+			throw HFileSystemException( "Attribute does not exist: "_ys.append( name_ ), -ENODATA );
 		}
 		ok = false;
 		HString ns( name_.left( pos ) );
@@ -835,7 +835,7 @@ public:
 			}
 		}
 		if ( ! ok ) {
-			throw HFileSystemException( "Attribute does not exist: "_ys.append( name_ ), -ENOATTR );
+			throw HFileSystemException( "Attribute does not exist: "_ys.append( name_ ), -ENODATA );
 		}
 		ok = false;
 		HString name( name_.mid( pos + 1 ) );
@@ -853,7 +853,7 @@ public:
 			}
 		}
 		if ( ! ok ) {
-			throw HFileSystemException( "Attribute does not exist: "_ys.append( name_ ), -ENOATTR );
+			throw HFileSystemException( "Attribute does not exist: "_ys.append( name_ ), -ENODATA );
 		}
 		_synced = false;
 		return;

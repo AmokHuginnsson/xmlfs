@@ -65,7 +65,7 @@ int main( int argc_, char* argv_[] ) {
 		setup.test_setup();
 		char fsname[] = "xmlfs";
 		argv_[0] = fsname;
-		rotate( argv_, argv_ + 1, argv_ + argc );
+		yaal::rotate( argv_, argv_ + 1, argv_ + argc );
 		-- argc;
 		xmlfs::main( argc_ - argc, argv_ + argc );
 		cerr << _( "Done" ) << endl;
